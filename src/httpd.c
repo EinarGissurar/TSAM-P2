@@ -154,12 +154,9 @@ void handle_connection(ClientConnection *connection) {
 	char *p, *method, *url, *host;
 	char buffer[1024];
 	int connection_close = FALSE;
-<<<<<<< HEAD
 	int step = 1;
-=======
 	struct sockaddr_in client_address;
 	int addrlen = sizeof(client_address);
->>>>>>> origin/master
 
 	/* TODO */
 	// implement recv in loop - count with case that request is larger than buffer
@@ -179,17 +176,17 @@ void handle_connection(ClientConnection *connection) {
 	p = strtok (buffer," ");
 	method = p;
 	
-	fprintf(stdout, "Method: %s\n", method);
+	//fprintf(stdout, "Method: %s\n", method);
 	while (p != NULL) {
 		p = strtok (NULL,"  \n");
 		step++;
 		if (step == 2) {
 			url = p;
-			fprintf(stdout, "Url: %s\n", url);
+			//fprintf(stdout, "Url: %s\n", url);
 		} 
 		else if (step == 5) {
 			host = p;
-			fprintf(stdout, "Host: %s\n", host);
+			//fprintf(stdout, "Host: %s\n", host);
 		}
 	}
 
@@ -215,17 +212,31 @@ void handle_connection(ClientConnection *connection) {
 	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
 
 	if (strcmp(method,"GET") == 0) {
-		fprintf(stdout, "Method is GET\n");
+		//fprintf(stdout, "Method is GET\n");
 		body = g_string_new(url);
 		g_string_append(body, " ");
 		g_string_append(body, host);
 		response = headers;
 		g_string_append(response, "\r\n");
 		g_string_append(response, body->str);
-		//g_string_append_printf(headers, "Content-Length: %lu", body->len);
+	}
+	else if (strcmp(method,"POST") == 0) {
+		fprintf(stdout, "Method is POST\n");
+		body = g_string_new(url);
+		g_string_append(body, " ");
+		g_string_append(body, host);
+		response = headers;
+		g_string_append(response, "\r\n");
+		g_string_append(response, body->str);
+	}
+	else if (strcmp(method,"HEADER") == 0) {
+		fprintf(stdout, "Method is HEADER\n");
+		body = g_string_new("something else");
+		response = buffer;
+		g_string_append(response, "\r\n");
+		g_string_append(response, body->str);
 	}
 	else {
-		fprintf(stdout, "Method is not GET\n");
 		body = g_string_new("something else");
 		response = headers;
 		g_string_append(response, "\r\n");
