@@ -151,7 +151,7 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 
 
 void handle_connection(ClientConnection *connection) {
-	char *p, *method, *url, *host;
+	char *p, *method, *url, *host, *data;
 	char buffer[1024];
 	int connection_close = FALSE;
 	int step = 1;
@@ -175,18 +175,15 @@ void handle_connection(ClientConnection *connection) {
 
 	p = strtok (buffer," ");
 	method = p;
-	
-	//fprintf(stdout, "Method: %s\n", method);
 	while (p != NULL) {
+		data = p; // Should stop in the data field.
 		p = strtok (NULL,"  \n");
 		step++;
 		if (step == 2) {
-			url = p;
-			//fprintf(stdout, "Url: %s\n", url);
+			url = p+1;
 		} 
 		else if (step == 5) {
 			host = p;
-			//fprintf(stdout, "Host: %s\n", host);
 		}
 	}
 
@@ -216,33 +213,25 @@ void handle_connection(ClientConnection *connection) {
 		body = g_string_new(url);
 		g_string_append(body, " ");
 		g_string_append(body, host);
-		response = headers;
-		g_string_append(response, "\r\n");
-		g_string_append(response, body->str);
 	}
 	else if (strcmp(method,"POST") == 0) {
 		fprintf(stdout, "Method is POST\n");
 		body = g_string_new(url);
 		g_string_append(body, " ");
 		g_string_append(body, host);
-		response = headers;
-		g_string_append(response, "\r\n");
-		g_string_append(response, body->str);
+		g_string_append(body, "\n\n");
+		g_string_append(body, data);
 	}
 	else if (strcmp(method,"HEADER") == 0) {
 		fprintf(stdout, "Method is HEADER\n");
 		body = g_string_new("something else");
-		response = buffer;
-		g_string_append(response, "\r\n");
-		g_string_append(response, body->str);
 	}
 	else {
-		body = g_string_new("something else");
-		response = headers;
-		g_string_append(response, "\r\n");
-		g_string_append(response, body->str);
-		g_string_append_printf(headers, "Content-Length: %lu", body->len);
+		body = g_string_new("Unknown method");
 	}
+	response = headers;
+	g_string_append(response, "\r\n");
+	g_string_append(response, body->str);
 	
 	
 	// TODO
