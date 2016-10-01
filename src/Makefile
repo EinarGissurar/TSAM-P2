@@ -20,6 +20,9 @@ clean:
 distclean: clean
 	rm -f httpd
 
+run:
+	./httpd $(SERVER_PORT)
+
 post:
 	@curl localhost:$(SERVER_PORT)
 
