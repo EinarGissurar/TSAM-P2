@@ -153,9 +153,10 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 
 
 void handle_connection(ClientConnection *connection) {
-
+	char *p, *method, *url, *host;
 	char buffer[1024];
 	int connection_close = FALSE;
+	int step = 1;
 
 	/* TODO */
 	// implement recv in loop - count with case that request is larger than buffer
@@ -167,6 +168,27 @@ void handle_connection(ClientConnection *connection) {
 	buffer[n] = '\0';
 
 	fprintf(stdout, "Received:\n%s\n", buffer);
+
+	p = strtok (buffer," ");
+	method = p;
+	
+	fprintf(stdout, "Method: %s\n", method);
+	while (p != NULL) {
+		p = strtok (NULL,"  \n");
+		step++;
+		if (step == 2) {
+			url = p;
+			fprintf(stdout, "Url: %s\n", url);
+		} 
+		else if (step == 5) {
+			host = p;
+			fprintf(stdout, "Host: %s\n", host);
+		}
+	}
+
+	
+
+
 
 	// TODO
 	// Add header: "Content-Type: text/html; charset=utf-8"
@@ -181,17 +203,36 @@ void handle_connection(ClientConnection *connection) {
 	// if there is header "Connection: keep-alive" in request, return it also in response
 	// In HTTP 1.1, all connections are considered persistent unless declared otherwise.
 
-	GString* headers = g_string_new("HTTP/1.1 200 OK\r\n");
+	GString *body;
+	GString *response;
+	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
+
+	if (strcmp(method,"GET") == 0) {
+		fprintf(stdout, "Method is GET\n");
+		body = g_string_new(url);
+		g_string_append(body, " ");
+		g_string_append(body, host);
+		response = headers;
+		g_string_append(response, "\r\n");
+		g_string_append(response, body->str);
+		//g_string_append_printf(headers, "Content-Length: %lu", body->len);
+	}
+	else {
+		fprintf(stdout, "Method is not GET\n");
+		body = g_string_new("something else");
+		response = headers;
+		g_string_append(response, "\r\n");
+		g_string_append(response, body->str);
+		g_string_append_printf(headers, "Content-Length: %lu", body->len);
+	}
+	
+	
 	// TODO
 	// generate body here (create function for it) according to assignment
-	GString* body = g_string_new("something");
+	
 	//g_string_append(response, "");
 
-	GString *response = headers;
-	g_string_append(response, "\r\n");
-	g_string_append(response, body->str);
-
-	g_string_append_printf(headers, "Content-Length: %lu", body->len);
+	
 
 
 	// TODO
