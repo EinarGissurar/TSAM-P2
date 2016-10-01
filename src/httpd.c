@@ -151,8 +151,9 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 
 
 void handle_connection(ClientConnection *connection) {
-	char *p, *method, *url, *host, *data;
 	char buffer[1024];
+	char *p, *method, *url, *host, *data;
+	p = method = url = host = data = &buffer[0]; 
 	int connection_close = FALSE;
 	int step = 1;
 	struct sockaddr_in client_address;
@@ -174,21 +175,18 @@ void handle_connection(ClientConnection *connection) {
 	fprintf(stdout, "Received:\n%s\n", buffer);
 
 	p = strtok (buffer," ");
-	method = p;
+	method = p; // Bind a pointer to method field.
 	while (p != NULL) {
 		data = p; // Should stop in the data field.
 		p = strtok (NULL,"  \n");
 		step++;
-		if (step == 2) {
+		if (step == 2) { // Bind a pointer to url.
 			url = p+1;
 		} 
-		else if (step == 5) {
+		else if (step == 5) { // Bind a pointer to host url
 			host = p;
 		}
 	}
-
-	
-
 
 
 	// TODO
@@ -215,7 +213,7 @@ void handle_connection(ClientConnection *connection) {
 		g_string_append(body, host);
 	}
 	else if (strcmp(method,"POST") == 0) {
-		fprintf(stdout, "Method is POST\n");
+		//fprintf(stdout, "Method is POST\n");
 		body = g_string_new(url);
 		g_string_append(body, " ");
 		g_string_append(body, host);
@@ -223,8 +221,9 @@ void handle_connection(ClientConnection *connection) {
 		g_string_append(body, data);
 	}
 	else if (strcmp(method,"HEADER") == 0) {
-		fprintf(stdout, "Method is HEADER\n");
-		body = g_string_new("something else");
+		//fprintf(stdout, "Method is HEADER\n");
+		body = g_string_new(buffer);
+		
 	}
 	else {
 		body = g_string_new("Unknown method");
