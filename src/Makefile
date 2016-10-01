@@ -6,8 +6,12 @@ LDFLAGS =
 LOADLIBES =
 LDLIBS =
 
+SERVER_PORT = 12345
+SERVER_PORT ?= $(/labs/tsam15/my_port)
+
 .DEFAULT: all
-.PHONY: all
+.PHONY: all post clean
+
 all: httpd
 
 clean:
@@ -15,3 +19,9 @@ clean:
 
 distclean: clean
 	rm -f httpd
+
+post:
+	@curl localhost:$(SERVER_PORT)
+
+zip:
+	cd ..; zip httpd.zip README src/httpd.c src/Makefile AUTHORS
