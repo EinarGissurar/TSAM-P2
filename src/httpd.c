@@ -99,12 +99,10 @@ void clean_and_die() {
 
 	fclose(log_file);
 
-	int num_of_connections = clients_queue->length;
+	printf("Closing %d connections.\n", clients_queue->length);
 
 	destroy_clients_queue(clients_queue);
 	clients_queue = NULL;
-
-	printf("%d connections closed.\n", num_of_connections);
 
 	exit(0);
 }
@@ -156,7 +154,12 @@ void handle_connection(ClientConnection *connection) {
 	char *p, *method, *url, *host;
 	char buffer[1024];
 	int connection_close = FALSE;
+<<<<<<< HEAD
 	int step = 1;
+=======
+	struct sockaddr_in client_address;
+	int addrlen = sizeof(client_address);
+>>>>>>> origin/master
 
 	/* TODO */
 	// implement recv in loop - count with case that request is larger than buffer
@@ -166,6 +169,10 @@ void handle_connection(ClientConnection *connection) {
 	ssize_t n = recv(connection->conn_fd, buffer, sizeof(buffer) - 1, 0);
 
 	buffer[n] = '\0';
+
+	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
+	printf("Receiving message from %s:%d (fd:%d)\n" , inet_ntoa(client_address.sin_addr),
+			ntohs(client_address.sin_port), connection->conn_fd);
 
 	fprintf(stdout, "Received:\n%s\n", buffer);
 
@@ -311,7 +318,7 @@ void run_loop() {
 			//add new client into the queue
 			new_client(conn_fd);
 
-			printf("New connection , socket fd is %d , ip is : %s , port : %d \n",
+			printf("New connection , socket fd is %d , ip: %s , port: %d \n",
 					conn_fd, inet_ntoa(client.sin_addr), ntohs(client.sin_port));
 
 			handle_connection(g_queue_peek_tail(clients_queue));
@@ -329,14 +336,15 @@ void run_loop() {
 
 int main(int argc, char *argv[]) {
 
-	struct sockaddr_in server;
-	int port_number = strtol(argv[1], NULL, 10);
-
 	// checking the number of arguments
 	if (argc != 2) {
 		printf("Usage: %s <port>\n", argv[0]);
 		return 1;
 	}
+
+	struct sockaddr_in server;
+	int port_number = strtol(argv[1], NULL, 10);
+
 
 	log_file = fopen("httpd.log","a");
 	if (log_file == NULL) {
@@ -358,7 +366,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &(int){ 1 }, sizeof(int)) < 0)
-    	perror("setsockopt(SO_REUSEADDR) failed");
+		perror("setsockopt(SO_REUSEADDR) failed");
 
 	/* Network functions need arguments in network byte order instead of
 	   host byte order. The macros htonl, htons convert the values. */
@@ -376,7 +384,7 @@ int main(int argc, char *argv[]) {
 	   welcome port.*/
 	printf("Listening on port %d \n", port_number);
 	listen(sockfd, 10);
-	printf("Waiting for connections ...\n");
+	printf("Waiting for connections ...\n\n");
 
 	run_loop();
 
