@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <glib.h>
+#include <time.h>
 
 #ifndef max
 	#define max(a,b) (((a) > (b)) ? (a) : (b))
@@ -155,7 +156,6 @@ void handle_connection(ClientConnection *connection) {
 	char *p, *method, *url, *host, *data;
 	p = method = url = host = data = &buffer[0]; 
 	int connection_close = FALSE;
-	int step = 1;
 	struct sockaddr_in client_address;
 	int addrlen = sizeof(client_address);
 
@@ -176,16 +176,15 @@ void handle_connection(ClientConnection *connection) {
 
 	p = strtok (buffer," ");
 	method = p; // Bind a pointer to method field.
+	p = strtok (NULL,"  \n");
+	url = p+1; // Bind a pointer to url.
 	while (p != NULL) {
 		data = p; // Should stop in the data field.
-		p = strtok (NULL,"  \n");
-		step++;
-		if (step == 2) { // Bind a pointer to url.
-			url = p+1;
-		} 
-		else if (step == 5) { // Bind a pointer to host url
+		if (strcmp(p, "Host:") == 0) { //Bind a pointer to host url
+			p = strtok (NULL,"  \n");
 			host = p;
 		}
+		p = strtok (NULL,"  \n");
 	}
 
 
@@ -224,8 +223,7 @@ void handle_connection(ClientConnection *connection) {
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		body = g_string_new(buffer);
-		fprintf(stdout, "Received:\n%s\n", buffer);
+		fprintf(stdout, "Received:\n%p\n", headers);
 	}
 	else {
 		body = g_string_new("Unknown method");
@@ -234,6 +232,26 @@ void handle_connection(ClientConnection *connection) {
 	g_string_append(response, "\r\n");
 	g_string_append(response, body->str);
 	
+	time_t now = time(NULL);
+	struct tm *now_tm = gmtime(&now);
+	char iso_8601[] = "YYYY-MM-DDT hh:mm:ss TZD"; // ctime(&now);
+	strftime(iso_8601, sizeof iso_8601, "%FT %T %Z", now_tm);
+
+	char log[1024];
+	memset(log, 0, sizeof(log));
+	strncpy(log, iso_8601, strlen(iso_8601));
+	strncat(log, " : ", 3);
+	strncat(log, host, strlen(host)-1);
+	strncat(log, " ", 1);
+	strncat(log, method, strlen(method));
+	strncat(log, " ", 1);
+	strncat(log, url, strlen(url));
+	strncat(log, " : ", 3);
+	strncat(log, response, strlen(response));
+	strncat(log, "\n", 1);
+	fprintf(stdout, "%s\n", log);
+
+	log_msg(log);
 	
 	// TODO
 	// generate body here (create function for it) according to assignment
