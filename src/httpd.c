@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <glib.h>
+#include <glib/gprintf.h>
 #include <time.h>
 
 #ifndef max
@@ -218,12 +219,11 @@ void handle_connection(ClientConnection *connection) {
 		body = g_string_new(url);
 		g_string_append(body, " ");
 		g_string_append(body, host);
-		g_string_append(body, "\n\n");
 		g_string_append(body, data);
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		fprintf(stdout, "Received:\n%p\n", headers);
+		fprintf(stdout, "Received:\n%p\n", headers->str);
 	}
 	else {
 		body = g_string_new("Unknown method");
@@ -238,8 +238,6 @@ void handle_connection(ClientConnection *connection) {
 	strftime(iso_8601, sizeof iso_8601, "%FT %T %Z", now_tm);
 
 	char log[1024];
-	char *bleh = (char*)response;
-	fprintf(stdout, "%s\n", bleh);
 	memset(log, 0, sizeof(log));
 	strncpy(log, iso_8601, strlen(iso_8601));
 	strncat(log, " : ", 3);
@@ -249,11 +247,14 @@ void handle_connection(ClientConnection *connection) {
 	strncat(log, " ", 1);
 	strncat(log, url, strlen(url));
 	strncat(log, " : ", 3);
-	strncat(log, bleh, strlen(bleh));
-	strncat(log, "\n", 1);
-	fprintf(stdout, "%s\n", log);
+	fprintf(stdout, "%s", log);
+	g_printf("%s", response->str);
+	printf("\n");
 
 	log_msg(log);
+	g_fprintf(log_file, "%s" ,response->str);
+	fprintf(log_file, "\n");
+	fflush(log_file);
 	
 	// TODO
 	// generate body here (create function for it) according to assignment
