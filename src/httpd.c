@@ -202,6 +202,8 @@ void handle_connection(ClientConnection *connection) {
 	// if there is header "Connection: keep-alive" in request, return it also in response
 	// In HTTP 1.1, all connections are considered persistent unless declared otherwise.
 
+	fprintf(stdout, "Method is %s\n", method);
+
 	GString *body;
 	GString *response;
 	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
@@ -220,10 +222,10 @@ void handle_connection(ClientConnection *connection) {
 		g_string_append(body, "\n\n");
 		g_string_append(body, data);
 	}
-	else if (strcmp(method,"HEADER") == 0) {
-		//fprintf(stdout, "Method is HEADER\n");
+	else if (strcmp(method,"HEAD") == 0) {
+		//fprintf(stdout, "Method is HEAD\n");
 		body = g_string_new(buffer);
-		
+		fprintf(stdout, "Received:\n%s\n", buffer);
 	}
 	else {
 		body = g_string_new("Unknown method");
