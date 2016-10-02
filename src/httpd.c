@@ -238,6 +238,8 @@ void handle_connection(ClientConnection *connection) {
 	strftime(iso_8601, sizeof iso_8601, "%FT %T %Z", now_tm);
 
 	char log[1024];
+	char *bleh = (char*)response;
+	fprintf(stdout, "%s\n", bleh);
 	memset(log, 0, sizeof(log));
 	strncpy(log, iso_8601, strlen(iso_8601));
 	strncat(log, " : ", 3);
@@ -247,7 +249,7 @@ void handle_connection(ClientConnection *connection) {
 	strncat(log, " ", 1);
 	strncat(log, url, strlen(url));
 	strncat(log, " : ", 3);
-	strncat(log, response, strlen(response));
+	strncat(log, bleh, strlen(bleh));
 	strncat(log, "\n", 1);
 	fprintf(stdout, "%s\n", log);
 
