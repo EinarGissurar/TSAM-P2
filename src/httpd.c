@@ -154,6 +154,7 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 
 void handle_connection(ClientConnection *connection) {
 	char buffer[1024];
+	char log[1024];
 	char *p, *method, *url, *host, *data;
 	p = method = url = host = data = &buffer[0]; 
 	int connection_close = FALSE;
@@ -178,7 +179,7 @@ void handle_connection(ClientConnection *connection) {
 	p = strtok (buffer," ");
 	method = p; // Bind a pointer to method field.
 	p = strtok (NULL,"  \n");
-	url = p+1; // Bind a pointer to url.
+	url = p; // Bind a pointer to url.
 	while (p != NULL) {
 		data = p; // Should stop in the data field.
 		if (strcmp(p, "Host:") == 0) { //Bind a pointer to host url
@@ -210,20 +211,22 @@ void handle_connection(ClientConnection *connection) {
 
 	if (strcmp(method,"GET") == 0) {
 		//fprintf(stdout, "Method is GET\n");
-		body = g_string_new(url);
+		body = g_string_new(url+1);
 		g_string_append(body, " ");
 		g_string_append(body, host);
 	}
 	else if (strcmp(method,"POST") == 0) {
 		//fprintf(stdout, "Method is POST\n");
-		body = g_string_new(url);
+		body = g_string_new(url+1);
 		g_string_append(body, " ");
 		g_string_append(body, host);
 		g_string_append(body, data);
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		fprintf(stdout, "Received:\n%p\n", headers->str);
+		g_string_append(body, " ");
+		fprintf(stdout, "Received:\n%s\n", headers->str);
+
 	}
 	else {
 		body = g_string_new("Unknown method");
@@ -234,10 +237,9 @@ void handle_connection(ClientConnection *connection) {
 	
 	time_t now = time(NULL);
 	struct tm *now_tm = gmtime(&now);
-	char iso_8601[] = "YYYY-MM-DDT hh:mm:ss TZD"; // ctime(&now);
-	strftime(iso_8601, sizeof iso_8601, "%FT %T %Z", now_tm);
+	char iso_8601[] = "YYYY-MM-DD Thh:mm:ss TZD"; // ctime(&now);
+	strftime(iso_8601, sizeof iso_8601, "%F T%T %Z", now_tm);
 
-	char log[1024];
 	memset(log, 0, sizeof(log));
 	strncpy(log, iso_8601, strlen(iso_8601));
 	strncat(log, " : ", 3);
@@ -247,14 +249,11 @@ void handle_connection(ClientConnection *connection) {
 	strncat(log, " ", 1);
 	strncat(log, url, strlen(url));
 	strncat(log, " : ", 3);
+	strncat(log, response->str, strlen(response->str));
+	strncat(log, "\n", 1);
 	fprintf(stdout, "%s", log);
-	g_printf("%s", response->str);
-	printf("\n");
 
 	log_msg(log);
-	g_fprintf(log_file, "%s" ,response->str);
-	fprintf(log_file, "\n");
-	fflush(log_file);
 	
 	// TODO
 	// generate body here (create function for it) according to assignment
