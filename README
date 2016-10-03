@@ -1,1 +1,51 @@
-Update this.
+/*
+ * Programming Assignment 2 – HTTP server
+ *
+ * Team:
+ * Einar Örn Gissurarson <einarog05@ru.is>
+ * Óskar Örn <oskart10@ru.is>
+ * Peter Hostačný <peterh16@ru.is>
+ */
+ 
+Short description of functions in this program:
+ 
+ void destroy_ClientConnection(ClientConnection *connection)
+ - Closes/destroys an instance of ClientConnection and frees the memory.
+ 
+ void remove_ClientConnection(ClientConnection *connection)
+ - Takes a connection from the queue and runs destroy_ClientConnection function.
+ 
+ void destroy_clients_queue(GQueue *clients_queue)
+ - Runs through the queue of clients and runs remove_ClientConnection for every instance in it, then frees the memory.
+
+ void clean_and_die()
+ - Closes the connection of both socket and file writer, runs destroy_clients_queue function and exits program.
+ 
+ void sig_handler(int signal_n)
+ - Signature handler function that closes down program, by running clean_and_die function.
+ 
+ void log_msg(char *msg)
+ - Writes out the contents of msg pointer into a log file.
+ 
+ void new_client(int conn_fd)
+ - If a new client wishes to establish a connection, this will create the connection and add it to the queue.
+ 
+ void add_socket_into_set(ClientConnection *connection, fd_set *readfds_ptr)
+ - Adds child socket to set.
+ 
+ void max_sockfd(ClientConnection *connection, int *max)
+ - 
+ 
+ int return_max_sockfd_in_queue(GQueue *clients_queue)
+ -  
+ 
+ void handle_connection(ClientConnection *connection)
+ - Processes the request of client and builds a response.
+ 
+ void handle_socket_if_waiting(ClientConnection *connection, fd_set *readfds)
+ - Checks if socket is in the set of waiting sockets and handles the connection if it is.
+ 
+ void run_loop()
+ - A loop function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in said queue.
+
+ 

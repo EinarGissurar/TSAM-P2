@@ -155,8 +155,8 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 void handle_connection(ClientConnection *connection) {
 	char buffer[1024];
 	char log[1024];
-	char *p, *method, *url, *host, *data;
-	p = method = url = host = data = &buffer[0]; 
+	char *p, *method, *url, *host, *data, *contentLenght;
+	p = method = url = host = data = contentLenght = &buffer[0]; 
 	int connection_close = FALSE;
 	struct sockaddr_in client_address;
 	int addrlen = sizeof(client_address);
@@ -182,7 +182,11 @@ void handle_connection(ClientConnection *connection) {
 	url = p; // Bind a pointer to url.
 	while (p != NULL) {
 		data = p; // Should stop in the data field.
-		if (strcmp(p, "Host:") == 0) { //Bind a pointer to host url
+		if (strncmp(p, "Content-Length:", 15) == 0) {
+			contentLenght = p;
+		}
+
+		if (strncmp(p, "Host:", 5) == 0) { //Bind a pointer to host url
 			p = strtok (NULL,"  \n");
 			host = p;
 		}
@@ -224,9 +228,7 @@ void handle_connection(ClientConnection *connection) {
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		g_string_append(body, " ");
-		fprintf(stdout, "Received:\n%s\n", headers->str);
-
+		body = g_string_new(contentLenght);
 	}
 	else {
 		body = g_string_new("Unknown method");
@@ -237,7 +239,7 @@ void handle_connection(ClientConnection *connection) {
 	
 	time_t now = time(NULL);
 	struct tm *now_tm = gmtime(&now);
-	char iso_8601[] = "YYYY-MM-DD Thh:mm:ss TZD"; // ctime(&now);
+	char iso_8601[] = "YYYY-MM-DD Thh:mm:ss TZD";
 	strftime(iso_8601, sizeof iso_8601, "%F T%T %Z", now_tm);
 
 	memset(log, 0, sizeof(log));
