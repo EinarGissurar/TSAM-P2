@@ -155,7 +155,7 @@ void write_body() {
 }
 
 GString *check_for_bg_color(char *urlPointer) {
-	GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head>\n</head>\n<body");
+	GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
 	GString *style = g_string_new(" style=\"background-color:");
 	GString *stylePrefix = g_string_new("?bg=");
 	for (unsigned int i = 0; i < strlen(urlPointer); i++) {
