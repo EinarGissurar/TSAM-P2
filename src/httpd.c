@@ -150,7 +150,24 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 	return max;
 }
 
+void write_body() {
 
+}
+
+GString *check_for_bg_color(char *urlPointer) {
+	GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head>\n</head>\n<body");
+	GString *style = g_string_new(" style=\"background-color:");
+	GString *stylePrefix = g_string_new("?bg=");
+	for (unsigned int i = 0; i < strlen(urlPointer); i++) {
+		if (g_str_has_prefix(urlPointer+i, stylePrefix->str)) {
+			g_string_append(HTMLStart, style->str);
+			g_string_append(HTMLStart, urlPointer+i+4);
+			g_string_append(HTMLStart, "\"");
+		}
+	}
+	g_string_append(HTMLStart, ">");
+	return HTMLStart;
+}
 
 void handle_connection(ClientConnection *connection) {
 	char buffer[1024];
@@ -208,7 +225,8 @@ void handle_connection(ClientConnection *connection) {
 	GString *body;
 	GString *response;
 	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
-	GString *HTMLOpen = g_string_new("<!doctype html>\n<html>\n<head>\n</head>\n<body>\n");
+	GString *HTMLOpen = check_for_bg_color(url);
+	fprintf(stdout, "%s\n", HTMLOpen->str);
 	GString *HTMLClose = g_string_new("\n</body>\n</html>");
 	body = HTMLOpen;
 	if (strcmp(method,"GET") == 0) {
