@@ -155,8 +155,8 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 void handle_connection(ClientConnection *connection) {
 	char buffer[1024];
 	char log[1024];
-	char *p, *method, *url, *host, *data, *contentLenght;
-	p = method = url = host = data = contentLenght = &buffer[0]; 
+	char *p, *method, *url, *host, *data;
+	p = method = url = host = data = &buffer[0]; 
 	int connection_close = FALSE;
 	struct sockaddr_in client_address;
 	int addrlen = sizeof(client_address);
@@ -182,10 +182,6 @@ void handle_connection(ClientConnection *connection) {
 	url = p; // Bind a pointer to url.
 	while (p != NULL) {
 		data = p; // Should stop in the data field.
-		if (strncmp(p, "Content-Length:", 15) == 0) {
-			contentLenght = p;
-		}
-
 		if (strncmp(p, "Host:", 5) == 0) { //Bind a pointer to host url
 			p = strtok (NULL,"  \n");
 			host = p;
@@ -212,27 +208,31 @@ void handle_connection(ClientConnection *connection) {
 	GString *body;
 	GString *response;
 	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
-
+	GString *HTMLOpen = g_string_new("<!doctype html>\n<html>\n<head>\n</head>\n<body>\n");
+	GString *HTMLClose = g_string_new("\n</body>\n</html>");
+	body = HTMLOpen;
 	if (strcmp(method,"GET") == 0) {
 		//fprintf(stdout, "Method is GET\n");
-		body = g_string_new(url+1);
+		g_string_append(body, url+1);
 		g_string_append(body, " ");
-		g_string_append(body, host);
+		g_string_append_len(body, host, strlen(host)-1);
 	}
 	else if (strcmp(method,"POST") == 0) {
 		//fprintf(stdout, "Method is POST\n");
-		body = g_string_new(url+1);
+		g_string_append(body, url+1);
 		g_string_append(body, " ");
-		g_string_append(body, host);
+		g_string_append_len(body, host, strlen(host)-1);
 		g_string_append(body, data);
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		body = g_string_new(contentLenght);
+		g_string_append(body, "Content-Length: ");
+		g_string_append_printf(body, "%d\n", (int)(strlen(headers->str) + strlen(body->str) + strlen(HTMLClose->str)));
 	}
 	else {
-		body = g_string_new("Unknown method");
+		g_string_append(body, "Unknown method");
 	}
+	g_string_append(body, HTMLClose->str);
 	response = headers;
 	g_string_append(response, "\r\n");
 	g_string_append(response, body->str);
