@@ -206,7 +206,6 @@ void handle_connection(ClientConnection *connection) {
 		p = strtok (NULL,"  \n");
 	}
 
-
 	// TODO
 	// Add header: "Content-Type: text/html; charset=utf-8"
 
@@ -226,7 +225,6 @@ void handle_connection(ClientConnection *connection) {
 	GString *response;
 	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
 	GString *HTMLOpen = check_for_bg_color(url);
-	fprintf(stdout, "%s\n", HTMLOpen->str);
 	GString *HTMLClose = g_string_new("\n</body>\n</html>");
 	body = HTMLOpen;
 	if (strcmp(method,"GET") == 0) {
