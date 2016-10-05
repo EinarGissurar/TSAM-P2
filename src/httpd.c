@@ -30,10 +30,6 @@
 
 #define KEEP_ALIVE_TIMEOUT 30
 
-#define HTMLStartOpen	"<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body"
-#define HTMLStartClose 	">\n"
-#define HTMLEnd 		"\n</body>\n</html>"
-
 
 // COOKIES IMPLEMENT BY USING HASH TABLE
 // https://developer.gnome.org/glib/stable/glib-Hash-Tables.html
@@ -67,10 +63,18 @@
 
 typedef enum HttpMethod {GET, HEAD, POST, UNKNOWN} HttpMethod;
 
+const char * const http_methods[] = {
+	"GET",
+	"HEAD",
+	"POST",
+	"UNKNOWN",
+};
+
 typedef struct ClientConnection {
 	int conn_fd;
 	GTimer *conn_timer;
 	int request_count;
+	struct sockaddr_in client_sockaddr;
 } ClientConnection;
 
 
@@ -78,20 +82,36 @@ typedef struct Request {
 	HttpMethod method;
 	GString *host;
 	GString *path;
+	GString *path_without_query;
+	GString *queries;
 	GString *message_body;
 	bool connection_close;
 } Request;
 
 
 
-
+/***  GLOBAL VARIABLES  ***/
 FILE *log_file = NULL;
 int sockfd; // master socket
 GQueue *clients_queue;
 
+/* Initialize structure */
+void init_Request(Request *request) {
+	request->host = g_string_new(NULL);
+	request->path = g_string_new(NULL);
+	request->path_without_query = g_string_new(NULL);
+	request->queries = g_string_new(NULL);
+	request->message_body = g_string_new(NULL);
+	request->connection_close = false;
+	request->method = UNKNOWN;
+}
+
+/* Free memory allocated for items in structure Request. */
 void destroy_Request(Request *request) {
 	g_string_free(request->host, TRUE);
 	g_string_free(request->path, TRUE);
+	g_string_free(request->path_without_query, TRUE);
+	g_string_free(request->queries, TRUE);
 	g_string_free(request->message_body, TRUE);
 }
 
@@ -100,12 +120,8 @@ void destroy_Request(Request *request) {
    @connection has to be allocated by malloc() */
 void destroy_ClientConnection(ClientConnection *connection) {
 
-	// find out client IP and port
-	struct sockaddr_in client_address;
-	int addrlen = sizeof(client_address);
-	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
-	printf("Closing connection %s:%d (fd:%d)\n", inet_ntoa(client_address.sin_addr),
-			ntohs(client_address.sin_port), connection->conn_fd);
+	printf("Closing connection %s:%d (fd:%d)\n", inet_ntoa(connection->client_sockaddr.sin_addr),
+			ntohs(connection->client_sockaddr.sin_port), connection->conn_fd);
 
 	close(connection->conn_fd); // close socket with client connection
 	g_timer_destroy(connection->conn_timer); // destroy timer
@@ -159,51 +175,24 @@ void log_msg(Request *request) {
 	char iso_8601[] = "YYYY-MM-DDThh:mm:ssTZD";
 	strftime(iso_8601, sizeof iso_8601, "%FT%T%Z", now_tm);
 
-	GString *fetched_method = g_string_sized_new(0);
-	if (request->method == POST) {
-		g_string_append(fetched_method, "POST");
-	}
-	else if (request->method == GET) {
-		g_string_append(fetched_method, "GET");
-	}
-	else if (request->method == HEAD) {
-		g_string_append(fetched_method, "HEAD");
-	}
-	else {
-		g_string_append(fetched_method, "UNKNOWN");
-	}
-	
+
 	GString *log_msg = g_string_new(iso_8601);
-	g_string_append_printf(log_msg, " : %s %s %s : InsertResponseCodeHere \n", request->host->str, fetched_method->str, request->path->str);
+	g_string_append_printf(log_msg, " : %s %s %s : InsertResponseCodeHere \n", request->host->str, http_methods[request->method], request->path->str);
 
-	//printf("%s\n", iso_8601);
-
-	/*
-	GTimeVal date;
-	g_get_current_time(&date);
-	gchar *date_str = g_time_val_to_iso8601(&date);
-	printf("%s\n", date_str);*/
-
-	/*strncpy(log, iso_8601, strlen(iso_8601));
-	strncat(log, " : ", 3);
-	strncat(log, host, strlen(host)-1);
-	strncat(log, " ", 1);
-	strncat(log, method, strlen(method));
-	strncat(log, " ", 1);
-	strncat(log, url, strlen(url));
-	strncat(log, " : ", 3);
-	strncat(log, response->str, strlen(response->str));
-	strncat(log, "\n", 1);
-	fprintf(stdout, "%s", log);*/
-
-	fprintf(log_file, "%s", log_msg->str);
+	fprintf(log_file, "%s", log_msg->str); // print log message to log file
 	fflush(log_file);
+	g_string_free(log_msg, TRUE); // free memory
+
 	return;
 }
 
 
 void new_client(int conn_fd) {
 	ClientConnection *connection = g_new0(ClientConnection, 1);
+	// find out client IP and port
+	int addrlen = sizeof(connection->client_sockaddr);
+	getpeername(conn_fd, (struct sockaddr*)&(connection->client_sockaddr), (socklen_t*)&addrlen);
+
 	connection->conn_fd = conn_fd;
 	connection->request_count = 0;
 	connection->conn_timer = g_timer_new();
@@ -270,7 +259,6 @@ bool receive_whole_mesage(int conn_fd, GString *message) {
 
 bool parse_request(GString *received_message, Request *request) {
 
-	request->connection_close = false; // initializing
 
 	// parsing METHOD
 	if (g_str_has_prefix(received_message->str, "GET")) {
@@ -310,6 +298,18 @@ bool parse_request(GString *received_message, Request *request) {
 	}
 	request->message_body = g_string_new(message_body);
 
+	// parse query from path
+	gchar *start_of_query = g_strstr_len(request->path->str, request->path->len, "?");
+	if (start_of_query != NULL) {
+		g_string_append_len(request->path_without_query, request->path->str, start_of_query - request->path->str);
+		g_string_append(request->queries, start_of_query+1);
+		gchar *end_of_query = g_strstr_len(request->queries->str, request->queries->len, "#");
+		if (end_of_query != NULL) {
+			g_string_truncate(request->queries, end_of_query - request->queries->str);
+		}
+	}
+	else
+		g_string_append(request->path_without_query, request->path->str);
 
 	// truncate message body so only headers will left
 	g_string_truncate(received_message, headers_length);
@@ -341,65 +341,50 @@ bool parse_request(GString *received_message, Request *request) {
 	return true;
 }
 
-GString *create_html_page(Request *request) {
-	bool show_uri = false;
+GString *create_html_page(Request *request, ClientConnection *connection) {
 
-	GString *html_page = g_string_new(HTMLStartOpen);
-	GString *html_uri = g_string_new("");
+	bool show_query = false;
+	bool show_empty_page = false;
 
-	//Look for background style query in path.
-	for(unsigned int i = 0; i < request->path->len; i++) {
-		if(g_str_has_prefix(request->path->str+i, "?")) {
-			g_string_append(html_uri, request->path->str+i+1);
-			if(g_str_has_prefix(request->path->str+i, "?bg=")) {
-				g_string_append(html_page, " style=\"background-color:");
-				g_string_append(html_page, request->path->str+i+4);
-				g_string_append(html_page, "\"");
-			}
-			show_uri = true;
+	GString *html_page = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
+
+	// special page /colour
+	if (g_strcmp0(request->path_without_query->str, "/colour") == 0) {
+		show_empty_page = true;
+		if(request->queries->len > 0 && g_str_has_prefix(request->queries->str, "bg=")) {
+			g_string_append_printf(html_page, " style=\"background-color:%s\"", request->queries->str+3);
 		}
 	}
-	g_string_append(html_page, HTMLEnd);
+	g_string_append(html_page, ">\n");
 
-	
+	// special page /test
+	if (g_strcmp0(request->path_without_query->str, "/test") == 0 && request->queries->len > 0) {
+		show_query = true;
+	}
 
-	//GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
-	//GString *style = g_string_new(" style=\"background-color:");
-	//GString *stylePrefix = g_string_new("?bg=");
-
-	// TODO
-
-	//g_string_append(HTMLStart, ">");
-	//GString *HTMLClose = g_string_new("\n</body>\n</html>");
-	
-
-	if (request->method == GET) {
-		//fprintf(stdout, "Method is GET\n");
-		if(!show_uri) {
-			g_string_append(html_page, request->path->str+1);
-			g_string_append(html_page, " ");
-			g_string_append(html_page, request->host->str);
+	if (!show_empty_page) {
+		if (request->method == UNKNOWN) {
+			g_string_append(html_page, "Unknown method");
 		}
 		else {
-			g_string_append(html_page, html_uri->str);
+			GString *path_to_display;
+			if (show_query)
+				path_to_display = request->path_without_query;
+			else
+				path_to_display = request->path;
+
+			g_string_append_printf(html_page, "http://%s%s %s:%d\r\n<br/>", request->host->str, path_to_display->str,
+				inet_ntoa(connection->client_sockaddr.sin_addr), ntohs(connection->client_sockaddr.sin_port));
+			if (request->method == POST) {
+				g_string_append_printf(html_page, "%s<br/>", request->message_body->str);
+			}
+			if (show_query) {
+				g_string_append_printf(html_page, "%s<br/>", request->queries->str);
+			}
 		}
 	}
-	else if (request->method == POST) {
-		//fprintf(stdout, "Method is POST\n");
-		g_string_append(html_page, request->path->str+1);
-		g_string_append(html_page, " ");
-		g_string_append(html_page, request->host->str);
-		g_string_append(html_page, request->message_body->str);
-	}
-	else if (request->method == HEAD) {
-		//fprintf(stdout, "Method is HEAD\n");
-		g_string_append_printf(html_page, "Content-Length: %d\n", (int)(html_page->len + strlen(HTMLEnd)));
-	}
-	else {
-		g_string_append(html_page, "Unknown method");
-	}
-	g_string_append(html_page, HTMLEnd);
-	//printf("%s\n", html_page->str);
+
+	g_string_append(html_page, "\n</body>\n</html>");
 
 	return html_page;
 }
@@ -409,14 +394,12 @@ GString *create_html_page(Request *request) {
 void handle_connection(ClientConnection *connection) {
 
 	Request request;
+	init_Request(&request);
 	GString *response = g_string_sized_new(1024);
 
-	// find out client IP and port
-	struct sockaddr_in client_address;
-	int addrlen = sizeof(client_address);
-	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
-	printf("Serving client %s:%d (fd:%d)\n", inet_ntoa(client_address.sin_addr),
-			ntohs(client_address.sin_port), connection->conn_fd);
+	// print out client IP and port
+	printf("Serving client %s:%d (fd:%d)\n", inet_ntoa(connection->client_sockaddr.sin_addr),
+			ntohs(connection->client_sockaddr.sin_port), connection->conn_fd);
 
 	// Receiving packet from socket
 	GString *received_message = g_string_sized_new(1024);
@@ -454,7 +437,7 @@ void handle_connection(ClientConnection *connection) {
 		g_string_append(response, "Connection: close\r\n");
 	}
 
-	GString *message_body = create_html_page(&request);
+	GString *message_body = create_html_page(&request, connection);
 	g_string_append_printf(response, "Content-Length: %lu\r\n", message_body->len);
 	g_string_append(response, "\r\n"); // newline separating headers and message body
 	g_string_append(response, message_body->str); // appending message body to the end of response
@@ -462,17 +445,17 @@ void handle_connection(ClientConnection *connection) {
 
 	send(connection->conn_fd, response->str, response->len, 0);
 
-	log_msg(&request);
+	log_msg(&request); // make a record to log file
 
 
 exit_handling:
 	g_string_free(received_message, TRUE);
 	g_string_free(response, TRUE);
-	//printf("nieco\n");
 	destroy_Request(&request);
 	if (request.connection_close) {
 		remove_ClientConnection(connection);
 	}
+	printf("\n"); // empty line
 
 	return;
 }
