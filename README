@@ -61,6 +61,23 @@ Short description of functions in this program:
  - Checks if socket is in the set of waiting sockets and handles the connection if it is.
  
  void run_loop()
- - A looping function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in said queue.
+ - A looping function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in the queue.
  
-  Majority of this project was implemented using the glib library, relying heavily on its built-in functions. 
+  Majority of this project was implemented using the glib library, relying heavily on its built-in functions. When the main function begins. The following features were implemented:
+  
+  1. When requesting from a client, the server will fetch the request and parse it. It will build a HTML page that displays a line containing the requested path and host and writes out a log file in the format "timestamp : <client ip>:<client port> <request method> <requested URL> : <response code>"
+  
+  2.
+  
+  3.
+  
+  4.
+  
+  5.
+  
+  6.
+  
+  7.
+  
+  
+  
