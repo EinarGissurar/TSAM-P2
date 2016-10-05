@@ -10,8 +10,8 @@ SHELL := /bin/bash
 SERVER_PORT := 12345
 
 # if "/labs/tsam15/my_port" exists
-ifeq (,$(wildcard /labs/tsam15/my_port))
-	#SERVER_PORT := $(/labs/tsam15/my_port)
+ifneq (,$(wildcard /labs/tsam15/my_port))
+	SERVER_PORT := $(/labs/tsam15/my_port)
 endif
 
 .DEFAULT: all
