@@ -126,6 +126,7 @@ void destroy_ClientConnection(ClientConnection *connection) {
 	g_timer_destroy(connection->conn_timer); // destroy timer
 	free(connection); // free memory allocated for this instance of ClientConnection
 }
+
 /* Takes a connection from the queue and runs destroy_ClientConnection function */
 void remove_ClientConnection(ClientConnection *connection) {
 	destroy_ClientConnection(connection);
@@ -133,6 +134,7 @@ void remove_ClientConnection(ClientConnection *connection) {
 		printf("Something is wrong. Connection was not found in queue.\n");
 	}
 }
+
 /* Runs through the queue of clients and runs remove_ClientConnection for every instance in it, 
    then frees the memory */
 void destroy_clients_queue(GQueue *clients_queue) {
@@ -157,7 +159,6 @@ void clean_and_die(int exit_code) {
 
 	exit(exit_code);
 }
-
 
 /* Signature handler function that closes down program, by running clean_and_die function */
 void sig_handler(int signal_n) {
@@ -199,11 +200,11 @@ void new_client(int conn_fd) {
 	g_queue_push_tail(clients_queue, connection);
 }
 
-
 /* Add child socket to set */
 void add_socket_into_set(ClientConnection *connection, fd_set *readfds_ptr) {
 	FD_SET(connection->conn_fd, readfds_ptr);
 }
+
 /* A helper function to find the connection with highest sockfd */
 void max_sockfd(ClientConnection *connection, int *max) {
 	*max = max(connection->conn_fd, *max);
@@ -230,14 +231,8 @@ void check_timer(ClientConnection *connection) {
 	}
 }
 
-
-<<<<<<< HEAD
 /* Receive whole packet from socket.
    Store data into @message (actual content of message will be discarded) */
-=======
-// Receive whole packet from socket.
-// Store data into @message (actual content of message will be discarded).
->>>>>>> 97b88b556f19277bb71daefe295fafbe1e758de7
 bool receive_whole_message(int conn_fd, GString *message) {
 
 	const ssize_t BUFFER_SIZE = 1024;
@@ -345,6 +340,7 @@ bool parse_request(GString *received_message, Request *request) {
 
 	return true;
 }
+
 	/* Uses the data in Request to build a HTML page, to be returned into body */
 	GString *create_html_page(Request *request, ClientConnection *connection) {
 
@@ -393,7 +389,6 @@ bool parse_request(GString *received_message, Request *request) {
 
 	return html_page;
 }
-
 
 /* Processes the request of client and builds a response, 
    using recieve_whole_message, parse_request, create_html_page and log_msg */
