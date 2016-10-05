@@ -11,7 +11,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <netinet/in.h>
-#include <arpa/inet.h> // inet_ntoa
+#include <arpa/inet.h> 
 #include <ctype.h>
 #include <string.h>
 #include <unistd.h>
@@ -19,7 +19,6 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <glib.h>
-//#include <glib/gprintf.h>
 #include <stdbool.h>
 #include <time.h>
 
@@ -127,20 +126,21 @@ void destroy_ClientConnection(ClientConnection *connection) {
 	g_timer_destroy(connection->conn_timer); // destroy timer
 	free(connection); // free memory allocated for this instance of ClientConnection
 }
-
+/* Takes a connection from the queue and runs destroy_ClientConnection function */
 void remove_ClientConnection(ClientConnection *connection) {
 	destroy_ClientConnection(connection);
 	if (!g_queue_remove(clients_queue, connection)) {
 		printf("Something is wrong. Connection was not found in queue.\n");
 	}
 }
-
+/* Runs through the queue of clients and runs remove_ClientConnection for every instance in it, 
+   then frees the memory */
 void destroy_clients_queue(GQueue *clients_queue) {
 	g_queue_foreach(clients_queue, (GFunc) remove_ClientConnection, NULL);
 	g_queue_free(clients_queue);
 }
 
-
+/* Closes the connection of both socket and file writer, runs destroy_clients_queue function and exits program */
 void clean_and_die(int exit_code) {
 
 	/* Close the connections. */
@@ -159,7 +159,7 @@ void clean_and_die(int exit_code) {
 }
 
 
-// Signal handler function.
+/* Signature handler function that closes down program, by running clean_and_die function */
 void sig_handler(int signal_n) {
 	if (signal_n == SIGINT) {
 		printf("\nShutting down...\n");
@@ -186,7 +186,7 @@ void log_msg(Request *request) {
 	return;
 }
 
-
+/* When a new client wishes to establish a connection, we create the connection and add it to the queue */
 void new_client(int conn_fd) {
 	ClientConnection *connection = g_new0(ClientConnection, 1);
 	// find out client IP and port
@@ -200,16 +200,16 @@ void new_client(int conn_fd) {
 }
 
 
-//add child socket to set
+/* Add child socket to set */
 void add_socket_into_set(ClientConnection *connection, fd_set *readfds_ptr) {
 	FD_SET(connection->conn_fd, readfds_ptr);
 }
-
+/* A helper function to find the connection with highest sockfd */
 void max_sockfd(ClientConnection *connection, int *max) {
 	*max = max(connection->conn_fd, *max);
 }
 
-
+/* Runs max_sockfd for every client in queue and returns the higest value */
 int return_max_sockfd_in_queue(GQueue *clients_queue) {
 	int max = 0;
 	g_queue_foreach(clients_queue, (GFunc) max_sockfd, &max);
@@ -231,9 +231,9 @@ void check_timer(ClientConnection *connection) {
 }
 
 
-// Receive whole packet from socket.
-// Store data into @message (actual content of message will be discarded).
-bool receive_whole_mesage(int conn_fd, GString *message) {
+/* Receive whole packet from socket.
+   Store data into @message (actual content of message will be discarded) */
+bool receive_whole_message(int conn_fd, GString *message) {
 
 	const ssize_t BUFFER_SIZE = 1024;
 	ssize_t n = 0;
@@ -256,7 +256,7 @@ bool receive_whole_mesage(int conn_fd, GString *message) {
 	return true;
 }
 
-
+/* Uses the data that was fetched in recieve_whole_message and parses it into a Request */
 bool parse_request(GString *received_message, Request *request) {
 
 
@@ -340,8 +340,8 @@ bool parse_request(GString *received_message, Request *request) {
 
 	return true;
 }
-
-GString *create_html_page(Request *request, ClientConnection *connection) {
+	/* Uses the data in Request to build a HTML page, to be returned into body */
+	GString *create_html_page(Request *request, ClientConnection *connection) {
 
 	bool show_query = false;
 	bool show_empty_page = false;
@@ -390,7 +390,8 @@ GString *create_html_page(Request *request, ClientConnection *connection) {
 }
 
 
-
+/* Processes the request of client and builds a response, 
+   using recieve_whole_message, parse_request, create_html_page and log_msg */
 void handle_connection(ClientConnection *connection) {
 
 	Request request;
@@ -403,7 +404,7 @@ void handle_connection(ClientConnection *connection) {
 
 	// Receiving packet from socket
 	GString *received_message = g_string_sized_new(1024);
-	if (!receive_whole_mesage(connection->conn_fd, received_message)) {
+	if (!receive_whole_message(connection->conn_fd, received_message)) {
 		request.connection_close = TRUE;
 		goto exit_handling; // message was not received or has length 0
 	}
@@ -468,7 +469,8 @@ void handle_socket_if_waiting(ClientConnection *connection, fd_set *readfds) {
 	}
 }
 
-
+/* A looping function that waits for incoming connection, adds it 
+   to the queue and attempts to processes all clients waiting in the queue */
 void run_loop() {
 	struct sockaddr_in client;
 	int max_sockfd;
@@ -526,7 +528,7 @@ void run_loop() {
 }
 
 
-
+/* main function */
 int main(int argc, char *argv[]) {
 
 	// checking the number of arguments
