@@ -29,7 +29,7 @@ run:
 	./httpd $(SERVER_PORT)
 
 post:
-	@curl localhost:$(SERVER_PORT)
+	@curl localhost:$(SERVER_PORT) --data "post request data"
 
 zip:
 	cd ..; zip httpd.zip README src/httpd.c src/Makefile AUTHORS

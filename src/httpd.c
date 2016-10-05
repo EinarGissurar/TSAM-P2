@@ -19,13 +19,16 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <glib.h>
-#include <glib/gprintf.h>
+//#include <glib/gprintf.h>
+#include <stdbool.h>
 #include <time.h>
 
 #ifndef max
 	#define max(a,b) (((a) > (b)) ? (a) : (b))
 	#define min(a,b) (((a) < (b)) ? (a) : (b))
 #endif
+
+#define KEEP_ALIVE_TIMEOUT 30
 
 
 // COOKIES IMPLEMENT BY USING HASH TABLE
@@ -58,24 +61,50 @@
 // https://www.tutorialspoint.com/http/http_header_fields.htm
 // - how select works: http://www.binarytides.com/multiple-socket-connections-fdset-select-linux/
 
+typedef enum HttpMethod {GET, HEAD, POST, UNKNOWN} HttpMethod;
 
 typedef struct ClientConnection {
 	int conn_fd;
 	GTimer *conn_timer;
+	int request_count;
 } ClientConnection;
+
+
+typedef struct Request {
+	HttpMethod method;
+	GString *host;
+	GString *path;
+	GString *message_body;
+	bool connection_close;
+} Request;
+
+
 
 
 FILE *log_file = NULL;
 int sockfd; // master socket
 GQueue *clients_queue;
 
+void destroy_Request(Request *request) {
+	g_string_free(request->host, TRUE);
+	g_string_free(request->path, TRUE);
+	g_string_free(request->message_body, TRUE);
+}
+
 
 /* Destroy/close/free instance of ClientConnection.
    @connection has to be allocated by malloc() */
 void destroy_ClientConnection(ClientConnection *connection) {
+
+	// find out client IP and port
+	struct sockaddr_in client_address;
+	int addrlen = sizeof(client_address);
+	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
+	printf("Closing connection %s:%d (fd:%d)\n", inet_ntoa(client_address.sin_addr),
+			ntohs(client_address.sin_port), connection->conn_fd);
+
 	close(connection->conn_fd); // close socket with client connection
-	if (connection->conn_timer != NULL)
-		g_timer_destroy(connection->conn_timer); // destroy timer, if any
+	g_timer_destroy(connection->conn_timer); // destroy timer
 	free(connection); // free memory allocated for this instance of ClientConnection
 }
 
@@ -92,7 +121,7 @@ void destroy_clients_queue(GQueue *clients_queue) {
 }
 
 
-void clean_and_die() {
+void clean_and_die(int exit_code) {
 
 	/* Close the connections. */
 	// http://stackoverflow.com/questions/4160347/close-vs-shutdown-socket
@@ -106,7 +135,7 @@ void clean_and_die() {
 	destroy_clients_queue(clients_queue);
 	clients_queue = NULL;
 
-	exit(0);
+	exit(exit_code);
 }
 
 
@@ -115,13 +144,40 @@ void sig_handler(int signal_n) {
 	if (signal_n == SIGINT) {
 		printf("\nShutting down...\n");
 	}
-	clean_and_die();
+	clean_and_die(0);
 }
 
 
 /* Function for printing messages into log file. */
-void log_msg(char *msg) {
-	fprintf(log_file, "%s", msg);
+void log_msg(Request *request) {
+
+	GString *log_msg = g_string_sized_new(512);
+
+	time_t now = time(NULL);
+	struct tm *now_tm = gmtime(&now);
+	char iso_8601[] = "YYYY-MM-DDThh:mm:ssTZD";
+	strftime(iso_8601, sizeof iso_8601, "%FT%T%Z", now_tm);
+	//printf("%s\n", iso_8601);
+
+	/*
+	GTimeVal date;
+	g_get_current_time(&date);
+	gchar *date_str = g_time_val_to_iso8601(&date);
+	printf("%s\n", date_str);*/
+
+	/*strncpy(log, iso_8601, strlen(iso_8601));
+	strncat(log, " : ", 3);
+	strncat(log, host, strlen(host)-1);
+	strncat(log, " ", 1);
+	strncat(log, method, strlen(method));
+	strncat(log, " ", 1);
+	strncat(log, url, strlen(url));
+	strncat(log, " : ", 3);
+	strncat(log, response->str, strlen(response->str));
+	strncat(log, "\n", 1);
+	fprintf(stdout, "%s", log);*/
+
+	fprintf(log_file, "%s", log_msg->str);
 	fflush(log_file);
 	return;
 }
@@ -130,6 +186,8 @@ void log_msg(char *msg) {
 void new_client(int conn_fd) {
 	ClientConnection *connection = g_new0(ClientConnection, 1);
 	connection->conn_fd = conn_fd;
+	connection->request_count = 0;
+	connection->conn_timer = g_timer_new();
 	g_queue_push_tail(clients_queue, connection);
 }
 
@@ -150,81 +208,135 @@ int return_max_sockfd_in_queue(GQueue *clients_queue) {
 	return max;
 }
 
-void write_body() {
+/* Check timer of the connection and close/destroy connection if time exceeded KEEP_ALIVE_TIMEOUT seconds */
+void check_timer(ClientConnection *connection) {
 
-}
+	gdouble seconds_elapsed = g_timer_elapsed(connection->conn_timer, NULL);
 
-GString *check_for_bg_color(char *urlPointer) {
-	GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
-	GString *style = g_string_new(" style=\"background-color:");
-	GString *stylePrefix = g_string_new("?bg=");
-	for (unsigned int i = 0; i < strlen(urlPointer); i++) {
-		if (g_str_has_prefix(urlPointer+i, stylePrefix->str)) {
-			g_string_append(HTMLStart, style->str);
-			g_string_append(HTMLStart, urlPointer+i+4);
-			g_string_append(HTMLStart, "\"");
+	if (seconds_elapsed >= KEEP_ALIVE_TIMEOUT) {
+		printf("[TIMEOUT] ");
+		destroy_ClientConnection(connection);
+		if (!g_queue_remove(clients_queue, connection)) {
+			printf("Something is wrong. Connection was not found in queue.\n");
 		}
 	}
-	g_string_append(HTMLStart, ">");
-	return HTMLStart;
 }
 
-void handle_connection(ClientConnection *connection) {
-	char buffer[1024];
-	char log[1024];
-	char *p, *method, *url, *host, *data;
-	p = method = url = host = data = &buffer[0]; 
-	int connection_close = FALSE;
-	struct sockaddr_in client_address;
-	int addrlen = sizeof(client_address);
 
-	/* TODO */
-	// implement recv in loop - count with case that request is larger than buffer
-	// call recv more times if it is neccessary and store message into some dynamic variable (string)
-	// parse http headers to some dictionary
+// Receive whole packet from socket.
+// Store data into @message (actual content of message will be discarded).
+bool receive_whole_mesage(int conn_fd, GString *message) {
 
-	ssize_t n = recv(connection->conn_fd, buffer, sizeof(buffer) - 1, 0);
+	const ssize_t BUFFER_SIZE = 1024;
+	ssize_t n = 0;
+	char buffer[BUFFER_SIZE];
+	g_string_truncate (message, 0); // empty provided GString variable
 
-	buffer[n] = '\0';
-
-	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
-	printf("Receiving message from %s:%d (fd:%d)\n" , inet_ntoa(client_address.sin_addr),
-			ntohs(client_address.sin_port), connection->conn_fd);
-
-	fprintf(stdout, "Received:\n%s\n", buffer);
-
-	p = strtok (buffer," ");
-	method = p; // Bind a pointer to method field.
-	p = strtok (NULL,"  \n");
-	url = p; // Bind a pointer to url.
-	while (p != NULL) {
-		data = p; // Should stop in the data field.
-		if (strncmp(p, "Host:", 5) == 0) { //Bind a pointer to host url
-			p = strtok (NULL,"  \n");
-			host = p;
+	do {
+		n = recv(conn_fd, buffer, BUFFER_SIZE - 1, 0);
+		if (n == -1) { // error while recv()
+			perror("recv error");
 		}
-		p = strtok (NULL,"  \n");
+		else if (n == 0) {
+			printf("Client was disconnected.\n");
+			return false;
+		}
+		buffer[n] = '\0';
+		g_string_append_len(message, buffer, n);
+	} while(n > 0 && n == BUFFER_SIZE - 1);
+
+	return true;
+}
+
+
+bool parse_request(GString *received_message, Request *request) {
+
+	request->connection_close = false; // initializing
+
+	// parsing METHOD
+	if (g_str_has_prefix(received_message->str, "GET")) {
+		request->method = GET;
+	}
+	else if (g_str_has_prefix(received_message->str, "HEAD")) {
+		request->method = HEAD;
+	}
+	else if (g_str_has_prefix(received_message->str, "POST")) {
+		request->method = POST;
+	}
+	else {
+		request->method = UNKNOWN;
+		printf("Unknown method in request. Connection will be closed.\n");
+		return false;
 	}
 
-	// TODO
-	// Add header: "Content-Type: text/html; charset=utf-8"
+	// parsing PATH
+	gchar **request_line = g_strsplit(received_message->str, " ", 3);
+	if (g_strv_length(request_line) < 3) {
+		g_strfreev(request_line);
+		printf("Request cannot be parsed. Connection will be closed.\n");
+		return false;
+	}
+	request->path = g_string_new(request_line[1]);
+	g_strfreev(request_line);
+
+	// parsing http request MESSAGE BODY
+	gchar *message_body = g_strstr_len(received_message->str, received_message->len, "\r\n\r\n");
+	int headers_length = message_body - received_message->str;
+	if (message_body == NULL) {
+		printf("Request cannot be parsed. Connection will be closed.\n");
+		return false;
+	}
+	else {
+		message_body += 4; // "\r\n\r\n"
+	}
+	request->message_body = g_string_new(message_body);
+
+
+	// truncate message body so only headers will left
+	g_string_truncate(received_message, headers_length);
+
+	// split message to headers
+	gchar **headers = g_strsplit_set(received_message->str, "\r\n", 0);
+	// headers can also contains empty lines because "\r\n" are understood as two delimiters in split command
+
+	// for each header line
+	for (unsigned int i = 0; i < g_strv_length(headers); i++) {
+		gchar *header = g_ascii_strdown(headers[i], -1); // convert to lowercase (arg. -1 if string is NULL terminated)
+		// convert to lowercase
+		if (g_str_has_prefix(header, "host:")) {
+			request->host = g_string_new(headers[i]+5);
+			g_strstrip(request->host->str); // removing leading&trailing whitespaces
+		}
+		if (g_str_has_prefix(header, "connection:")) {
+			g_strstrip(headers[i]+11); // removing leading&trailing whitespaces
+			if (g_strcmp0(headers[i]+11, "close") == 0)
+				request->connection_close = true;
+		}
+	}
+	if (request->host == NULL) {
+		printf("\"Host:\" header not found. Connection will be closed.\n");
+		return false;
+	}
+	g_strfreev(headers);
+
+	return true;
+}
+
+
+GString *create_html_page(Request *request) {
+
+	GString *html_page = g_string_sized_new(512);
+
+	//GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
+	//GString *style = g_string_new(" style=\"background-color:");
+	//GString *stylePrefix = g_string_new("?bg=");
 
 	// TODO
-	// Add header with date and time (example: "Date: Tue, 15 Nov 1994 08:12:31 GMT")
-	// https://tools.ietf.org/html/rfc7231#page-65
 
-	/* TODO */
-	// PARSE HEADERS
-	// if there is header "Connection: keep-alive" start timer at the end of this function before returning
-	// if there is header "Connection: keep-alive" in request, return it also in response
-	// In HTTP 1.1, all connections are considered persistent unless declared otherwise.
+	//g_string_append(HTMLStart, ">");
 
-	fprintf(stdout, "Method is %s\n", method);
 
-	GString *body;
-	GString *response;
-	GString *headers = g_string_new("HTTP/1.1 200 OK\r\n");
-	GString *HTMLOpen = check_for_bg_color(url);
+	/*
 	GString *HTMLClose = g_string_new("\n</body>\n</html>");
 	body = HTMLOpen;
 	if (strcmp(method,"GET") == 0) {
@@ -242,64 +354,84 @@ void handle_connection(ClientConnection *connection) {
 	}
 	else if (strcmp(method,"HEAD") == 0) {
 		//fprintf(stdout, "Method is HEAD\n");
-		g_string_append(body, "Content-Length: ");
 		g_string_append_printf(body, "%d\n", (int)(strlen(headers->str) + strlen(body->str) + strlen(HTMLClose->str)));
 	}
 	else {
 		g_string_append(body, "Unknown method");
 	}
 	g_string_append(body, HTMLClose->str);
-	response = headers;
-	g_string_append(response, "\r\n");
-	g_string_append(response, body->str);
-	
-	time_t now = time(NULL);
-	struct tm *now_tm = gmtime(&now);
-	char iso_8601[] = "YYYY-MM-DD Thh:mm:ss TZD";
-	strftime(iso_8601, sizeof iso_8601, "%F T%T %Z", now_tm);
+*/
 
-	memset(log, 0, sizeof(log));
-	strncpy(log, iso_8601, strlen(iso_8601));
-	strncat(log, " : ", 3);
-	strncat(log, host, strlen(host)-1);
-	strncat(log, " ", 1);
-	strncat(log, method, strlen(method));
-	strncat(log, " ", 1);
-	strncat(log, url, strlen(url));
-	strncat(log, " : ", 3);
-	strncat(log, response->str, strlen(response->str));
-	strncat(log, "\n", 1);
-	fprintf(stdout, "%s", log);
-
-	log_msg(log);
-	
-	// TODO
-	// generate body here (create function for it) according to assignment
-	
-	//g_string_append(response, "");
-
-	
+	return html_page;
+}
 
 
-	// TODO
-	// IF THERE IS A HEADER "Connection: close", add this header also to response
-	if (FALSE) { // change condition after parsing headers
-		// add header to the response
-		connection_close = TRUE;
+
+void handle_connection(ClientConnection *connection) {
+
+	Request request;
+	GString *response = g_string_sized_new(1024);
+
+	// find out client IP and port
+	struct sockaddr_in client_address;
+	int addrlen = sizeof(client_address);
+	getpeername(connection->conn_fd, (struct sockaddr*)&client_address , (socklen_t*)&addrlen);
+	printf("Serving client %s:%d (fd:%d)\n", inet_ntoa(client_address.sin_addr),
+			ntohs(client_address.sin_port), connection->conn_fd);
+
+	// Receiving packet from socket
+	GString *received_message = g_string_sized_new(1024);
+	if (!receive_whole_mesage(connection->conn_fd, received_message)) {
+		request.connection_close = TRUE;
+		goto exit_handling; // message was not received or has length 0
+	}
+	fprintf(stdout, "Received:\n%s\n", received_message->str);
+
+	// parse request
+	if (!parse_request(received_message, &request)) {
+		request.connection_close = TRUE;
+		goto exit_handling; // message was not received or has length 0
 	}
 
-	// TODO
-	// maybe reset timer if connection is persistent (question is in which case we should reset timer - rfc ?)
+	time_t now = time(NULL);
+	struct tm *now_tm = gmtime(&now);
+	char date_and_time[512];
+	strftime(date_and_time, sizeof date_and_time, "%a, %d %b %Y %H:%M:%S %Z", now_tm);
 
-	send(connection->conn_fd, response->str, (size_t)response->len, 0);
+	g_string_append(response, "HTTP/1.1 200 OK\r\n");
+	g_string_append(response, "Content-Type: text/html; charset=utf-8\r\n");
+	// https://tools.ietf.org/html/rfc7231#page-65
+	g_string_append_printf(response, "Date: %s\r\n", date_and_time); // example: "Date: Tue, 15 Nov 1994 08:12:31 GMT"
 
-	g_string_free(headers, TRUE);
-	g_string_free(body, TRUE);
+	connection->request_count++; // increment counter of requests per connection
+	if (!request.connection_close && connection->request_count < 100) {
+		g_timer_start(connection->conn_timer); // reset timer
+		// In HTTP 1.1, all connections are considered persistent unless declared otherwise.
+		g_string_append(response, "Connection: keep-alive\r\n");
+		g_string_append_printf(response, "Keep-Alive: timeout=%d, max=100\r\n", KEEP_ALIVE_TIMEOUT);
+	}
+	else {
+		request.connection_close = TRUE; // in case request_count is >= 100
+		g_string_append(response, "Connection: close\r\n");
+	}
 
-	// remove this after implementation of Connection: close
-	remove_ClientConnection(connection);
+	GString *message_body = create_html_page(&request);
+	g_string_append_printf(response, "Content-Length: %lu\r\n", message_body->len);
+	g_string_append(response, "\r\n"); // newline separating headers and message body
+	g_string_append(response, message_body->str); // appending message body to the end of response
+	g_string_free(message_body, TRUE);
 
-	if (connection_close) {
+	send(connection->conn_fd, response->str, response->len, 0);
+
+	log_msg(&request);
+
+
+exit_handling:
+	g_string_free(received_message, TRUE);
+	g_string_free(response, TRUE);
+	printf("nieco\n");
+	destroy_Request(&request);
+	if (request.connection_close) {
 		remove_ClientConnection(connection);
 	}
 
@@ -322,7 +454,7 @@ void run_loop() {
 	fd_set readfds;
 	while(42) {
 		struct timeval tv;
-		// every second check all timers - for purposes of handling keep-alive duration (30s)
+		// every second check all timers - for purposes of handling keep-alive timeout
 		tv.tv_sec = 1;
 		tv.tv_usec = 0;
 
@@ -342,9 +474,8 @@ void run_loop() {
 			return;
 
 		}
-		else if (retval == 0) {// timeout
-			// TODO
-			// check all client's timers, if any of them exceeded 30 seconds, close the connection and destroy/remove record from clients_queue
+		else if (retval == 0) { // timeout
+			g_queue_foreach(clients_queue, (GFunc) check_timer, NULL);
 			continue;
 		}
 
@@ -357,15 +488,16 @@ void run_loop() {
 			//add new client into the queue
 			new_client(conn_fd);
 
-			printf("New connection , socket fd is %d , ip: %s , port: %d \n",
-					conn_fd, inet_ntoa(client.sin_addr), ntohs(client.sin_port));
+			printf("New connection: %s:%d (socket: %d )\n",
+					inet_ntoa(client.sin_addr), ntohs(client.sin_port), conn_fd);
 
 			handle_connection(g_queue_peek_tail(clients_queue));
 		}
 
 		g_queue_foreach(clients_queue, (GFunc) handle_socket_if_waiting, &readfds);
 
-		// TODO check timers also here
+		// check timer of every connection in queue
+		g_queue_foreach(clients_queue, (GFunc) check_timer, NULL);
 
 	}
 
@@ -427,6 +559,6 @@ int main(int argc, char *argv[]) {
 
 	run_loop();
 
-	clean_and_die();
+	clean_and_die(0);
 
 }
