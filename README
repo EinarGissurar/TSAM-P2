@@ -9,6 +9,9 @@
  
 Short description of functions in this program:
  
+ void init_Request(Request *request)
+ - Initializes a define struct containing variables used to parse the input message.
+ 
  void destroy_ClientConnection(ClientConnection *connection)
  - Closes/destroys an instance of ClientConnection and frees the memory.
  
@@ -24,28 +27,57 @@ Short description of functions in this program:
  void sig_handler(int signal_n)
  - Signature handler function that closes down program, by running clean_and_die function.
  
- void log_msg(char *msg)
- - Writes out the contents of msg pointer into a log file.
+ void log_msg(Request *request)
+ - Takes data from request and writes out log message in format of "timestamp : <client ip>:<client port> <request method> <requested URL> : <response code>"
  
  void new_client(int conn_fd)
- - If a new client wishes to establish a connection, this will create the connection and add it to the queue.
+ - When a new client wishes to establish a connection, this will create the connection and add it to the queue.
  
  void add_socket_into_set(ClientConnection *connection, fd_set *readfds_ptr)
  - Adds child socket to set.
  
  void max_sockfd(ClientConnection *connection, int *max)
- - 
+ - A helper function to find the connection with highest sockfd.
  
  int return_max_sockfd_in_queue(GQueue *clients_queue)
- -  
+ - Runs max_sockfd for every client in queue and returns the higest value.
+ 
+ void check_timer(ClientConnection *connection)
+ - Checks the time of the connection and closes it, if it times out.
+ 
+ bool recieve_whole_message(int conn_fd, GString *message)
+ - Recieves whole package from socket and stores data to be processed. Returns false if this fails, otherwise true.
+ 
+ bool parse_request(GString *recieved_message, Request *request)
+ - Uses the data that was fetched in recieve_whole_message and parses it into a Request.
+ 
+ GString *create_html_page(Request *request, ClientConnection *connection)
+ - Uses the data in Request to build a HTML page, to be returned into body.
  
  void handle_connection(ClientConnection *connection)
- - Processes the request of client and builds a response.
+ - Processes the request of client and builds a response, using recieve_whole_message, parse_request, create_html_page and log_msg.
  
  void handle_socket_if_waiting(ClientConnection *connection, fd_set *readfds)
  - Checks if socket is in the set of waiting sockets and handles the connection if it is.
  
  void run_loop()
- - A loop function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in said queue.
-
+ - A looping function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in the queue.
  
+  Majority of this project was implemented using the glib library, relying heavily on its built-in functions. When the main function begins. The following features were implemented:
+  
+  1. When requesting from a client, the server will fetch the request and parse it. It will build a HTML page that displays a line containing the requested path and host and writes out a log file in the format "timestamp : <client ip>:<client port> <request method> <requested URL> : <response code>"
+  
+  2.
+  
+  3.
+  
+  4.
+  
+  5.
+  
+  6.
+  
+  7.
+  
+  
+  

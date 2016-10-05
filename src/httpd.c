@@ -231,8 +231,13 @@ void check_timer(ClientConnection *connection) {
 }
 
 
+<<<<<<< HEAD
 /* Receive whole packet from socket.
    Store data into @message (actual content of message will be discarded) */
+=======
+// Receive whole packet from socket.
+// Store data into @message (actual content of message will be discarded).
+>>>>>>> 97b88b556f19277bb71daefe295fafbe1e758de7
 bool receive_whole_message(int conn_fd, GString *message) {
 
 	const ssize_t BUFFER_SIZE = 1024;
@@ -441,7 +446,11 @@ void handle_connection(ClientConnection *connection) {
 	GString *message_body = create_html_page(&request, connection);
 	g_string_append_printf(response, "Content-Length: %lu\r\n", message_body->len);
 	g_string_append(response, "\r\n"); // newline separating headers and message body
-	g_string_append(response, message_body->str); // appending message body to the end of response
+
+	if (request->method != HEAD) {
+		g_string_append(response, message_body->str); // appending message body to the end of response
+	}
+
 	g_string_free(message_body, TRUE);
 
 	send(connection->conn_fd, response->str, response->len, 0);
