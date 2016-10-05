@@ -37,12 +37,12 @@ Short description of functions in this program:
  - Adds child socket to set.
  
  void max_sockfd(ClientConnection *connection, int *max)
- - 
+ - A helper function to find the connection with highest sockfd.
  
  int return_max_sockfd_in_queue(GQueue *clients_queue)
- -  
+ - Runs max_sockfd for every client in queue and returns the higest value.
  
- void check_time(ClientConnection *connection)
+ void check_timer(ClientConnection *connection)
  - Checks the time of the connection and closes it, if it times out.
  
  bool recieve_whole_message(int conn_fd, GString *message)
@@ -62,5 +62,5 @@ Short description of functions in this program:
  
  void run_loop()
  - A looping function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in said queue.
-
- Majority of this project was implemented using the glib library, relying heavily on its built-in functions. 
+ 
+  Majority of this project was implemented using the glib library, relying heavily on its built-in functions. 
