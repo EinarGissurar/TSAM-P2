@@ -30,6 +30,10 @@
 
 #define KEEP_ALIVE_TIMEOUT 30
 
+#define HTMLStartOpen	"<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body"
+#define HTMLStartClose 	">\n"
+#define HTMLEnd 		"\n</body>\n</html>"
+
 
 // COOKIES IMPLEMENT BY USING HASH TABLE
 // https://developer.gnome.org/glib/stable/glib-Hash-Tables.html
@@ -147,16 +151,31 @@ void sig_handler(int signal_n) {
 	clean_and_die(0);
 }
 
-
 /* Function for printing messages into log file. */
 void log_msg(Request *request) {
-
-	GString *log_msg = g_string_sized_new(512);
 
 	time_t now = time(NULL);
 	struct tm *now_tm = gmtime(&now);
 	char iso_8601[] = "YYYY-MM-DDThh:mm:ssTZD";
 	strftime(iso_8601, sizeof iso_8601, "%FT%T%Z", now_tm);
+
+	GString *fetched_method = g_string_sized_new(0);
+	if (request->method == POST) {
+		g_string_append(fetched_method, "POST");
+	}
+	else if (request->method == GET) {
+		g_string_append(fetched_method, "GET");
+	}
+	else if (request->method == HEAD) {
+		g_string_append(fetched_method, "HEAD");
+	}
+	else {
+		g_string_append(fetched_method, "UNKNOWN");
+	}
+	
+	GString *log_msg = g_string_new(iso_8601);
+	g_string_append_printf(log_msg, " : %s %s %s : InsertResponseCodeHere \n", request->host->str, fetched_method->str, request->path->str);
+
 	//printf("%s\n", iso_8601);
 
 	/*
@@ -322,10 +341,27 @@ bool parse_request(GString *received_message, Request *request) {
 	return true;
 }
 
-
 GString *create_html_page(Request *request) {
+	bool show_uri = false;
 
-	GString *html_page = g_string_sized_new(512);
+	GString *html_page = g_string_new(HTMLStartOpen);
+	GString *html_uri = g_string_new("");
+
+	//Look for background style query in path.
+	for(unsigned int i = 0; i < request->path->len; i++) {
+		if(g_str_has_prefix(request->path->str+i, "?")) {
+			g_string_append(html_uri, request->path->str+i+1);
+			if(g_str_has_prefix(request->path->str+i, "?bg=")) {
+				g_string_append(html_page, " style=\"background-color:");
+				g_string_append(html_page, request->path->str+i+4);
+				g_string_append(html_page, "\"");
+			}
+			show_uri = true;
+		}
+	}
+	g_string_append(html_page, HTMLEnd);
+
+	
 
 	//GString *HTMLStart = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
 	//GString *style = g_string_new(" style=\"background-color:");
@@ -334,33 +370,36 @@ GString *create_html_page(Request *request) {
 	// TODO
 
 	//g_string_append(HTMLStart, ">");
+	//GString *HTMLClose = g_string_new("\n</body>\n</html>");
+	
 
-
-	/*
-	GString *HTMLClose = g_string_new("\n</body>\n</html>");
-	body = HTMLOpen;
-	if (strcmp(method,"GET") == 0) {
+	if (request->method == GET) {
 		//fprintf(stdout, "Method is GET\n");
-		g_string_append(body, url+1);
-		g_string_append(body, " ");
-		g_string_append_len(body, host, strlen(host)-1);
+		if(!show_uri) {
+			g_string_append(html_page, request->path->str+1);
+			g_string_append(html_page, " ");
+			g_string_append(html_page, request->host->str);
+		}
+		else {
+			g_string_append(html_page, html_uri->str);
+		}
 	}
-	else if (strcmp(method,"POST") == 0) {
+	else if (request->method == POST) {
 		//fprintf(stdout, "Method is POST\n");
-		g_string_append(body, url+1);
-		g_string_append(body, " ");
-		g_string_append_len(body, host, strlen(host)-1);
-		g_string_append(body, data);
+		g_string_append(html_page, request->path->str+1);
+		g_string_append(html_page, " ");
+		g_string_append(html_page, request->host->str);
+		g_string_append(html_page, request->message_body->str);
 	}
-	else if (strcmp(method,"HEAD") == 0) {
+	else if (request->method == HEAD) {
 		//fprintf(stdout, "Method is HEAD\n");
-		g_string_append_printf(body, "%d\n", (int)(strlen(headers->str) + strlen(body->str) + strlen(HTMLClose->str)));
+		g_string_append_printf(html_page, "Content-Length: %d\n", (int)(html_page->len + strlen(HTMLEnd)));
 	}
 	else {
-		g_string_append(body, "Unknown method");
+		g_string_append(html_page, "Unknown method");
 	}
-	g_string_append(body, HTMLClose->str);
-*/
+	g_string_append(html_page, HTMLEnd);
+	//printf("%s\n", html_page->str);
 
 	return html_page;
 }
@@ -429,7 +468,7 @@ void handle_connection(ClientConnection *connection) {
 exit_handling:
 	g_string_free(received_message, TRUE);
 	g_string_free(response, TRUE);
-	printf("nieco\n");
+	//printf("nieco\n");
 	destroy_Request(&request);
 	if (request.connection_close) {
 		remove_ClientConnection(connection);
