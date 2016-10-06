@@ -395,6 +395,8 @@ GString *create_html_page(Request *request, ClientConnection *connection) {
 /* Uses the data that was fetched in recieve_whole_message and parses it into a Request */
 bool parse_request(GString *received_message, Request *request) {
 
+	bool default_persistent = true;
+
 	// parsing METHOD
 	if (g_str_has_prefix(received_message->str, "GET")) {
 		request->method = GET;
@@ -419,6 +421,9 @@ bool parse_request(GString *received_message, Request *request) {
 		return false;
 	}
 	g_string_assign(request->path, request_line[1]);
+	if (g_strcmp0(request_line[2], "HTTP/1.0")) {
+		default_persistent = false;
+	}
 	g_strfreev(request_line);
 
 	// parsing http request MESSAGE BODY
@@ -484,8 +489,11 @@ bool parse_request(GString *received_message, Request *request) {
 		if (g_strcmp0(header_name, "connection") == 0) {
 			if (g_strcmp0(header_value, "close") == 0)
 				request->connection_close = true;
+			if (!default_persistent && g_strcmp0(header_value, "keep-alive") != 0)
+				request->connection_close = true;
 		}
 	}
+
 	if (request->host == NULL) {
 		printf("\"Host:\" header not found. Connection will be closed.\n");
 		g_strfreev(headers_arr);

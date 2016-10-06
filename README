@@ -6,76 +6,89 @@
  * Óskar Örn <oskart10@ru.is>
  * Peter Hostačný <peterh16@ru.is>
  */
- 
+
   Majority of this project was implemented using the glib library, relying heavily on its built-in functions. When the main function begins. The following features were implemented:
-  
+
   1. When requesting from a client, the server will fetch the request and parse it. It will build a HTML page that displays a line containing the requested path and host and write out a log file in the format "timestamp : <client ip>:<client port> <request method> <requested URL> : <response code>"
-  
-  2. Persistent connections are supported. Unless the incomming header specifically includes "Connection: close," the connection is kept alive until 30 seconds of inactivity has passed.
-  
-  3. When a requested path contains a query for a background color, 'style="background-color:requested_color" ' is added to the body of the html page.
-  
-  4. TODO
-  
-  5. When recieving connection from multiple clients, the incomming requests are pushed into a cueue. 
-  
+
+  2. Persistent connections are supported.
+    	- for HTTP/1.1 requests: Unless the incomming header specifically includes "Connection: close" the connection is kept alive until 30 seconds of inactivity has passed (max. 100 requests).
+    	- for HTTP/1.0 requests: Unless the incomming header specifically includes "Connection: keep-alive" the connection is closed right after sending response to client.
+
+  3. When a requested path contains a query for a background color on page "/test/colour", 'style="background-color:requested_color" ' is added to the body of the html page and cookie is created + sent to the client. Keep in mind that cookies are located in memory, thus database is discarded after shutting down the server.
+
+  4. Headers are parsed and stored into hash_table (glibc). Path "/test/headers" is reserved for displaying all headers from request nice formatted. Server sets up cookie and send it back to the clients when client first time open "test/colour" with "bg" query.
+
+
+  5. When recieving connection from multiple clients, the incomming requests are pushed into a queue and for every connection is started timer (keep-alive 30sec)
+
   6. TODO
-  
-  7. TODO
-  
-  
+
+=======================================================
+
+RESERVED ADDRESSES:
+
+  1. http://$(HOST):$(PORT)/test/headers
+     - display headers from request
+  2. http://$(HOST):$(PORT)/test/colour?bg=$(COLOUR)
+  	- display colored page and set up cookie
+  3. http://$(HOST):$(PORT)/test/query?some_query#fragment
+  - display URL without queries and fragments to client + display separated query under URL
+
+=======================================================
+
   Short description of functions in this program:
- 
+
  void init_Request(Request *request)
  - Initializes a define struct containing variables used to parse the input message.
- 
+
  void destroy_ClientConnection(ClientConnection *connection)
  - Closes/destroys an instance of ClientConnection and frees the memory.
- 
+
  void remove_ClientConnection(ClientConnection *connection)
  - Takes a connection from the queue and runs destroy_ClientConnection function.
- 
+
  void destroy_clients_queue(GQueue *clients_queue)
  - Runs through the queue of clients and runs remove_ClientConnection for every instance in it, then frees the memory.
 
  void clean_and_die()
  - Closes the connection of both socket and file writer, runs destroy_clients_queue function and exits program.
- 
+
  void sig_handler(int signal_n)
  - Signature handler function that closes down program, by running clean_and_die function.
- 
+
  void log_msg(Request *request)
  - Takes data from request and writes out log message in format of "timestamp : <client ip>:<client port> <request method> <requested URL> : <response code>"
- 
+
  void new_client(int conn_fd)
  - When a new client wishes to establish a connection, this will create the connection and add it to the queue.
- 
+
  void add_socket_into_set(ClientConnection *connection, fd_set *readfds_ptr)
  - Adds child socket to set.
- 
+
  void max_sockfd(ClientConnection *connection, int *max)
  - A helper function to find the connection with highest sockfd.
- 
+
  int return_max_sockfd_in_queue(GQueue *clients_queue)
  - Runs max_sockfd for every client in queue and returns the higest value.
- 
+
  void check_timer(ClientConnection *connection)
  - Checks the time of the connection and closes it, if it times out.
- 
+
  bool recieve_whole_message(int conn_fd, GString *message)
  - Recieves whole package from socket and stores data to be processed. Returns false if this fails, otherwise true.
- 
+
  bool parse_request(GString *recieved_message, Request *request)
  - Uses the data that was fetched in recieve_whole_message and parses it into a Request.
- 
+
  GString *create_html_page(Request *request, ClientConnection *connection)
  - Uses the data in Request to build a HTML page, to be returned into body.
- 
+
  void handle_connection(ClientConnection *connection)
  - Processes the request of client and builds a response, using recieve_whole_message, parse_request, create_html_page and log_msg.
- 
+
  void handle_socket_if_waiting(ClientConnection *connection, fd_set *readfds)
  - Checks if socket is in the set of waiting sockets and handles the connection if it is.
- 
+
  void run_loop()
  - A looping function that waits for incomming connection, adds it to the queue and attempts to processes all clients waiting in the queue.
