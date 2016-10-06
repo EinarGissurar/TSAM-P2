@@ -11,7 +11,7 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <netinet/in.h>
-#include <arpa/inet.h> 
+#include <arpa/inet.h>
 #include <ctype.h>
 #include <string.h>
 #include <unistd.h>
@@ -74,6 +74,7 @@ typedef struct ClientConnection {
 	GTimer *conn_timer;
 	int request_count;
 	struct sockaddr_in client_sockaddr;
+	GString *cookie_token;
 } ClientConnection;
 
 
@@ -82,27 +83,30 @@ typedef struct Request {
 	GString *host;
 	GString *path;
 	GString *path_without_query;
-	GString *queries;
+	GString *query;
 	GString *message_body;
 	bool connection_close;
+	GHashTable* headers;
 } Request;
-
 
 
 /***  GLOBAL VARIABLES  ***/
 FILE *log_file = NULL;
 int sockfd; // master socket
 GQueue *clients_queue;
+GHashTable* cookies;
+int cookie_cnt = 0;
 
 /* Initialize structure */
 void init_Request(Request *request) {
 	request->host = g_string_new(NULL);
 	request->path = g_string_new(NULL);
 	request->path_without_query = g_string_new(NULL);
-	request->queries = g_string_new(NULL);
+	request->query = g_string_new(NULL);
 	request->message_body = g_string_new(NULL);
 	request->connection_close = false;
 	request->method = UNKNOWN;
+	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 }
 
 /* Free memory allocated for items in structure Request. */
@@ -110,8 +114,13 @@ void destroy_Request(Request *request) {
 	g_string_free(request->host, TRUE);
 	g_string_free(request->path, TRUE);
 	g_string_free(request->path_without_query, TRUE);
-	g_string_free(request->queries, TRUE);
+	g_string_free(request->query, TRUE);
 	g_string_free(request->message_body, TRUE);
+	g_hash_table_destroy(request->headers);
+}
+
+void print_header(gchar *key, gchar *value, GString *destination) {
+	g_string_append_printf(destination, "[%s] : [%s]<br/>\n", key, value);
 }
 
 
@@ -124,7 +133,8 @@ void destroy_ClientConnection(ClientConnection *connection) {
 
 	close(connection->conn_fd); // close socket with client connection
 	g_timer_destroy(connection->conn_timer); // destroy timer
-	free(connection); // free memory allocated for this instance of ClientConnection
+	g_string_free(connection->cookie_token, TRUE);
+	g_free(connection); // free memory allocated for this instance of ClientConnection
 }
 
 /* Takes a connection from the queue and runs destroy_ClientConnection function */
@@ -135,7 +145,7 @@ void remove_ClientConnection(ClientConnection *connection) {
 	}
 }
 
-/* Runs through the queue of clients and runs remove_ClientConnection for every instance in it, 
+/* Runs through the queue of clients and runs remove_ClientConnection for every instance in it,
    then frees the memory */
 void destroy_clients_queue(GQueue *clients_queue) {
 	g_queue_foreach(clients_queue, (GFunc) remove_ClientConnection, NULL);
@@ -157,10 +167,12 @@ void clean_and_die(int exit_code) {
 	destroy_clients_queue(clients_queue);
 	clients_queue = NULL;
 
+	g_hash_table_destroy(cookies);
+
 	exit(exit_code);
 }
 
-/* Signature handler function that closes down program, by running clean_and_die function */
+/* Signal handler function that closes down program, by running clean_and_die function */
 void sig_handler(int signal_n) {
 	if (signal_n == SIGINT) {
 		printf("\nShutting down...\n");
@@ -187,6 +199,55 @@ void log_msg(Request *request) {
 	return;
 }
 
+/*  Random string generator */
+void random_string(char *string, size_t length)
+{
+	static char charset[] = "0123456789"
+				"abcdefghijklmnopqrstuvwxyz"
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+	/* Seed number for rand() */
+	srand((unsigned int) time(0));
+
+	while (length-- > 0) {
+		size_t index = (double) rand() / RAND_MAX * (sizeof charset - 1);
+		*string++ = charset[index];
+	}
+
+	*string = '\0';
+}
+
+bool check_cookie_in_headers(Request *request, ClientConnection *connection) {
+
+	bool cookie_found = false;
+	gchar *cookie_header_value = g_hash_table_lookup(request->headers, "cookie");
+
+	// if there was header Cookie
+	if (cookie_header_value) {
+		gchar **cookies_splitted = g_strsplit_set(cookie_header_value, ";", 0);
+		for (unsigned int i = 0; i < g_strv_length(cookies_splitted); i++) {
+			gchar **cookie = g_strsplit_set(cookies_splitted[i], "=", 2);
+			if (g_strv_length(cookie) == 2) {
+				g_strstrip(cookie[0]);
+				g_strstrip(cookie[1]);
+				if (g_strcmp0(cookie[0], "sessionToken") == 0) {
+					printf("CLIENT SENT COOKIE: [%s]\n", cookie[1]);
+					printf("GOING TO LOOK IT UP\n");
+					if (g_hash_table_lookup(cookies, cookie[1])) {
+						g_string_assign(connection->cookie_token, cookie[1]);
+						printf("COOKIE FOUND IN HASH_TABLE, ASSIGNED TO CONNECTION\n");
+						cookie_found = true;
+					}
+				}
+			}
+			g_strfreev(cookie);
+		}
+		g_strfreev(cookies_splitted);
+	}
+	return cookie_found;
+}
+
+
 /* When a new client wishes to establish a connection, we create the connection and add it to the queue */
 void new_client(int conn_fd) {
 	ClientConnection *connection = g_new0(ClientConnection, 1);
@@ -197,6 +258,7 @@ void new_client(int conn_fd) {
 	connection->conn_fd = conn_fd;
 	connection->request_count = 0;
 	connection->conn_timer = g_timer_new();
+	connection->cookie_token = g_string_new(NULL);
 	g_queue_push_tail(clients_queue, connection);
 }
 
@@ -256,9 +318,82 @@ bool receive_whole_message(int conn_fd, GString *message) {
 	return true;
 }
 
+/* Uses the data in Request to build a HTML page, to be returned into body */
+GString *create_html_page(Request *request, ClientConnection *connection) {
+
+	bool show_query = false;
+	bool show_empty_page = false;
+	bool show_headers = false;
+
+	GString *html_page = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
+
+	// special page /colour
+	if (g_strcmp0(request->path_without_query->str, "/test/colour") == 0) {
+		show_empty_page = true;
+		if(request->query->len > 0 && g_str_has_prefix(request->query->str, "bg=")) {
+			g_string_append_printf(html_page, " style=\"background-color:%s\"", request->query->str+3);
+
+			// cookie was not provided by client or is wrong
+			if (connection->cookie_token->len == 0) {
+				char token[16];
+				random_string(token, 16);
+				g_string_assign(connection->cookie_token, token);
+				printf("NEW COOKIE GENERATED: [%s]\n", token);
+			}
+			// create/rewrite value (background color for this client)
+			g_hash_table_insert(cookies, g_strdup(connection->cookie_token->str), g_strdup(request->query->str+3));
+			printf("NEW VALUE INSERTED INTO HASH TABLE: [%s]\n", connection->cookie_token->str);
+		}
+		else if (connection->cookie_token->len > 0) { // correct cookie was provided in the request
+
+			gchar *color = g_hash_table_lookup(cookies, connection->cookie_token->str);
+			g_string_append_printf(html_page, " style=\"background-color:%s\"", color);
+		}
+	}
+	g_string_append(html_page, ">\n");
+
+	// special page /test
+	if (g_strcmp0(request->path_without_query->str, "/test/query") == 0 && request->query->len > 0) {
+		show_query = true;
+	}
+
+	if (g_strcmp0(request->path_without_query->str, "/test/headers") == 0) {
+		show_headers = true;
+	}
+
+	if (!show_empty_page) {
+		if (request->method == UNKNOWN) {
+			g_string_append(html_page, "Unknown method");
+		}
+		else {
+			GString *path_to_display;
+			if (show_query)
+				path_to_display = request->path_without_query;
+			else
+				path_to_display = request->path;
+
+			g_string_append_printf(html_page, "http://%s%s %s:%d<br/>\n", request->host->str, path_to_display->str,
+				inet_ntoa(connection->client_sockaddr.sin_addr), ntohs(connection->client_sockaddr.sin_port));
+			if (request->method == POST) {
+				g_string_append_printf(html_page, "%s<br/>\n", request->message_body->str);
+			}
+			if (show_query) {
+				g_string_append_printf(html_page, "%s<br/>\n", request->query->str);
+			}
+			if (show_headers) {
+				g_hash_table_foreach(request->headers, (GHFunc)print_header, html_page);
+			}
+		}
+	}
+
+	g_string_append(html_page, "\n</body>\n</html>");
+
+	return html_page;
+}
+
+
 /* Uses the data that was fetched in recieve_whole_message and parses it into a Request */
 bool parse_request(GString *received_message, Request *request) {
-
 
 	// parsing METHOD
 	if (g_str_has_prefix(received_message->str, "GET")) {
@@ -283,7 +418,7 @@ bool parse_request(GString *received_message, Request *request) {
 		printf("Request cannot be parsed. Connection will be closed.\n");
 		return false;
 	}
-	request->path = g_string_new(request_line[1]);
+	g_string_assign(request->path, request_line[1]);
 	g_strfreev(request_line);
 
 	// parsing http request MESSAGE BODY
@@ -296,107 +431,80 @@ bool parse_request(GString *received_message, Request *request) {
 	else {
 		message_body += 4; // "\r\n\r\n"
 	}
-	request->message_body = g_string_new(message_body);
+	g_string_assign(request->message_body, message_body);
 
 	// parse query from path
 	gchar *start_of_query = g_strstr_len(request->path->str, request->path->len, "?");
 	if (start_of_query != NULL) {
+		g_string_truncate(request->path_without_query, 0);
 		g_string_append_len(request->path_without_query, request->path->str, start_of_query - request->path->str);
-		g_string_append(request->queries, start_of_query+1);
-		gchar *end_of_query = g_strstr_len(request->queries->str, request->queries->len, "#");
+		g_string_assign(request->query, start_of_query+1);
+		gchar *end_of_query = g_strstr_len(request->query->str, request->query->len, "#");
 		if (end_of_query != NULL) {
-			g_string_truncate(request->queries, end_of_query - request->queries->str);
+			g_string_truncate(request->query, end_of_query - request->query->str);
 		}
 	}
 	else
-		g_string_append(request->path_without_query, request->path->str);
+		g_string_assign(request->path_without_query, request->path->str);
 
 	// truncate message body so only headers will left
 	g_string_truncate(received_message, headers_length);
 
 	// split message to headers
-	gchar **headers = g_strsplit_set(received_message->str, "\r\n", 0);
-	// headers can also contains empty lines because "\r\n" are understood as two delimiters in split command
+	gchar *start_of_headers = g_strstr_len(received_message->str, received_message->len, "\r\n");
+	gchar **headers_arr = g_strsplit_set(start_of_headers, "\r\n", 0);
 
 	// for each header line
-	for (unsigned int i = 0; i < g_strv_length(headers); i++) {
-		gchar *header = g_ascii_strdown(headers[i], -1); // convert to lowercase (arg. -1 if string is NULL terminated)
-		// convert to lowercase
-		if (g_str_has_prefix(header, "host:")) {
-			request->host = g_string_new(headers[i]+5);
-			g_strstrip(request->host->str); // removing leading&trailing whitespaces
+	for (unsigned int i = 0; i < g_strv_length(headers_arr); i++) {
+
+		// headers can also contains empty lines because "\r\n" are understood as two delimiters in split command
+		if (strlen(headers_arr[i]) == 0)
+			continue;
+
+		gchar **header_line = g_strsplit_set(headers_arr[i], ":", 2);
+		if (g_strv_length(header_line) != 2) {
+			printf("WRONG FORMAT OF HEADER\n");
+			g_strfreev(headers_arr);
+			g_strfreev(header_line);
+			return false;
 		}
-		if (g_str_has_prefix(header, "connection:")) {
-			g_strstrip(headers[i]+11); // removing leading&trailing whitespaces
-			if (g_strcmp0(headers[i]+11, "close") == 0)
+
+		gchar *header_name = g_ascii_strdown(header_line[0], -1); // convert to lowercase (arg. -1 if string is NULL terminated)
+		gchar *header_value = g_strdup(header_line[1]);
+		g_strstrip(header_value); // strip leading and trailing whitespaces
+		g_strfreev(header_line); // free splitted line
+
+		g_hash_table_insert(request->headers, header_name, header_value);
+		// gchar *value = g_hash_table_lookup(hash_table, "key")
+		// g_free(gchar *pointer);
+
+		if (g_strcmp0(header_name, "host") == 0) {
+			g_string_assign(request->host, header_value);
+		}
+		if (g_strcmp0(header_name, "connection") == 0) {
+			if (g_strcmp0(header_value, "close") == 0)
 				request->connection_close = true;
 		}
 	}
 	if (request->host == NULL) {
 		printf("\"Host:\" header not found. Connection will be closed.\n");
+		g_strfreev(headers_arr);
 		return false;
 	}
-	g_strfreev(headers);
+	g_strfreev(headers_arr);
 
 	return true;
 }
 
-	/* Uses the data in Request to build a HTML page, to be returned into body */
-	GString *create_html_page(Request *request, ClientConnection *connection) {
 
-	bool show_query = false;
-	bool show_empty_page = false;
-
-	GString *html_page = g_string_new("<!doctype html>\n<html>\n<head><meta charset=\"utf-8\"><title>Test page.</title>\n</head>\n<body");
-
-	// special page /colour
-	if (g_strcmp0(request->path_without_query->str, "/colour") == 0) {
-		show_empty_page = true;
-		if(request->queries->len > 0 && g_str_has_prefix(request->queries->str, "bg=")) {
-			g_string_append_printf(html_page, " style=\"background-color:%s\"", request->queries->str+3);
-		}
-	}
-	g_string_append(html_page, ">\n");
-
-	// special page /test
-	if (g_strcmp0(request->path_without_query->str, "/test") == 0 && request->queries->len > 0) {
-		show_query = true;
-	}
-
-	if (!show_empty_page) {
-		if (request->method == UNKNOWN) {
-			g_string_append(html_page, "Unknown method");
-		}
-		else {
-			GString *path_to_display;
-			if (show_query)
-				path_to_display = request->path_without_query;
-			else
-				path_to_display = request->path;
-
-			g_string_append_printf(html_page, "http://%s%s %s:%d\r\n<br/>", request->host->str, path_to_display->str,
-				inet_ntoa(connection->client_sockaddr.sin_addr), ntohs(connection->client_sockaddr.sin_port));
-			if (request->method == POST) {
-				g_string_append_printf(html_page, "%s<br/>", request->message_body->str);
-			}
-			if (show_query) {
-				g_string_append_printf(html_page, "%s<br/>", request->queries->str);
-			}
-		}
-	}
-
-	g_string_append(html_page, "\n</body>\n</html>");
-
-	return html_page;
-}
-
-/* Processes the request of client and builds a response, 
+/* Processes the request of client and builds a response,
    using recieve_whole_message, parse_request, create_html_page and log_msg */
 void handle_connection(ClientConnection *connection) {
 
 	Request request;
 	init_Request(&request);
 	GString *response = g_string_sized_new(1024);
+	bool set_cookie = false;
 
 	// print out client IP and port
 	printf("Serving client %s:%d (fd:%d)\n", inet_ntoa(connection->client_sockaddr.sin_addr),
@@ -438,11 +546,21 @@ void handle_connection(ClientConnection *connection) {
 		g_string_append(response, "Connection: close\r\n");
 	}
 
+	if (!check_cookie_in_headers(&request, connection)) {
+		set_cookie = true; // cookie sent by client is not valid or client didn't send any
+	}
+
 	GString *message_body = create_html_page(&request, connection);
 	g_string_append_printf(response, "Content-Length: %lu\r\n", message_body->len);
+
+	if (set_cookie && connection->cookie_token->len > 0) {
+		g_string_append_printf(response, "Set-Cookie: sessionToken=%s\r\n", connection->cookie_token->str);
+	}
+
 	g_string_append(response, "\r\n"); // newline separating headers and message body
 
-	if (request->method != HEAD) {
+
+	if (request.method != HEAD) {
 		g_string_append(response, message_body->str); // appending message body to the end of response
 	}
 
@@ -473,11 +591,13 @@ void handle_socket_if_waiting(ClientConnection *connection, fd_set *readfds) {
 	}
 }
 
-/* A looping function that waits for incoming connection, adds it 
+/* A looping function that waits for incoming connection, adds it
    to the queue and attempts to processes all clients waiting in the queue */
 void run_loop() {
 	struct sockaddr_in client;
 	int max_sockfd;
+
+	cookies = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
 
 	fd_set readfds;
 	while(42) {
